@@ -3,7 +3,8 @@
 분류별로 접고 펴는 개인 할일판. 정적 페이지 하나로 되어 있고 GitHub Pages에서 바로 연다.
 
 - 주소: https://iseungsang01.github.io/todo-board/
-- 저장: Supabase. 화면에서 아이디·비밀번호로 회원가입하면 바로 로그인되고, 어느 기기에서든 같은 목록이 보인다. 다른 기기에서 바꾼 것은 그 창으로 돌아올 때 다시 불러온다. **내보내기**/**가져오기**는 JSON 백업용.
+- 계정: 일정표(on-my-plate/planner) 계정 그대로. 여기서 회원가입해도 일정표 계정이 생긴다.
+- 저장: Supabase. 마지막 목록을 브라우저에 캐시해 두어 앱을 열면 로그인된 채로 바로 보이고, 오프라인에서 바꾼 것은 연결되면 올라간다. 다른 기기에서 바꾼 것은 그 창으로 돌아올 때 다시 불러온다. **내보내기**/**가져오기**는 JSON 백업용.
 - 휴대폰에서는 Chrome 메뉴의 "홈 화면에 추가"로 앱처럼 띄울 수 있다.
 
 ## 쓰는 법
@@ -22,9 +23,9 @@
 
 ### Supabase
 
-- planner 프로젝트(`gznuqhjenzeucpmonesl`)에 얹혀 있지만 planner와 섞이지 않는다. Supabase Auth(사용자 목록·메일 설정)는 쓰지 않고, `todo_board_users`/`todo_board_sessions`/`todo_board_docs` 표와 `todo_board_*` 함수만 쓴다.
-- 표는 RLS만 켜고 정책이 없어 직접은 못 읽는다. 아이디·비밀번호 확인과 읽기·쓰기는 모두 함수(security definer) 안에서 한다. 정의는 `schema.sql`.
-- `todo_board_docs_old`는 Supabase Auth를 쓰던 이전 판의 표(빈 분류 한 줄)라 지워도 된다.
+- planner 프로젝트(`gznuqhjenzeucpmonesl`)를 쓴다. 로그인·회원가입은 on-my-plate-app의 `planner-api` Edge Function(`/api/auth/login`, `/api/auth/signup`)에 맡기고, 할일판 함수는 그 세션 토큰을 `planner_sessions`에서 확인만 한다(planner 표는 읽기만).
+- 데이터는 `todo_board_docs` 하나. RLS만 켜고 정책이 없어 직접은 못 읽고, `todo_board_load/save/remove` 함수로만 드나든다. 정의는 `schema.sql`.
+- `todo_board_users`, `todo_board_sessions`, `todo_board_docs_old`는 예전 판의 표라 안 쓴다.
 - `index.html`의 anon key는 공개용이라 커밋해도 된다.
 
 예전 localStorage 판에서 쓰던 할 일은 처음 로그인했을 때 서버가 비어 있으면 자동으로 올라간다.
