@@ -992,6 +992,9 @@ $("logoutBtn").addEventListener("click", async () => {
   location.reload();
 });
 
+// 인터넷 없이도 앱 화면이 열리게 (sw.js)
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
 const savedToken = localStorage.getItem(TOKEN_KEY);
 if (savedToken) startBoard(savedToken); else showLogin();
 </script>
