@@ -236,8 +236,8 @@ textarea.text:focus { outline: none; background: var(--bg); }
   </header>
 
   <form class="login" id="login" hidden>
-    <input id="loginEmail" type="email" required autocomplete="email" placeholder="이메일" aria-label="이메일">
-    <input id="loginPw" type="password" required minlength="6" autocomplete="current-password" placeholder="비밀번호 (6자 이상)" aria-label="비밀번호">
+    <input id="loginId" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="아이디" aria-label="아이디">
+    <input id="loginPw" type="password" autocomplete="current-password" placeholder="비밀번호" aria-label="비밀번호">
     <div class="inrow">
       <button class="primary" id="loginBtn" type="submit">로그인</button>
       <button id="signupBtn" type="button">회원가입</button>
@@ -294,34 +294,35 @@ let hideDone = store.get("hideDone", false);
 
 /* ---------- 저장소: Supabase todo_board_docs 표 ----------
    할 일은 {tasks: {id: 문서}, meta: {categories: 문서}} 꼴로 메모리에 두고,
-   바꿀 때마다 화면을 먼저 고친 뒤 docs 표에 한 줄씩 upsert/delete 한다.
-   다른 기기에서 바꾸면 realtime으로 따라온다. 표 정의는 schema.sql. */
+   바꿀 때마다 화면을 먼저 고친 뒤 todo_board_* 함수로 한 줄씩 저장/삭제한다.
+   로그인은 Supabase Auth가 아니라 todo_board_users 표의 아이디·비밀번호로 하고, 받은 토큰을 이 브라우저에 둔다.
+   다른 기기에서 바꾼 것은 이 창으로 돌아올 때 다시 불러온다. 표·함수 정의는 schema.sql. */
 const SUPABASE_URL = "https://gznuqhjenzeucpmonesl.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd6bnVxaGplbnpldWNwbW9uZXNsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MzU3MzQsImV4cCI6MjA5MDQxMTczNH0.tBierKB6FDlXjEXfMliNd3OGhg-iEqThJi633Ejv7RY";
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+const TOKEN_KEY = "todo-board:token";
 const OLD_DATA_KEY = "todo-board:data"; // 예전 localStorage 판 데이터
-async function makeDb(uid) {
-  const state = {};
+async function makeDb(token) {
+  let state = {};
   const listeners = {};
   const bucket = (name) => (state[name] = state[name] || {});
   const subs = (name) => (listeners[name] = listeners[name] || new Set());
   function emit(name) { for (const fn of subs(name)) fn(); }
-  async function run(q) { const { error } = await q; if (error) throw error; }
-  const upsert = (rows) => run(sb.from("todo_board_docs").upsert(rows.map(r => ({ ...r, user_id: uid, updated_at: new Date().toISOString() }))));
-  const remove = (name, id) => run(sb.from("todo_board_docs").delete().match({ user_id: uid, name, id }));
+  async function rpc(fn, args) { const { data, error } = await sb.rpc(fn, { p_token: token, ...args }); if (error) throw error; return data; }
+  const upsert = (rows) => rpc("todo_board_save", { p_rows: rows });
+  const remove = (name, id) => rpc("todo_board_remove", { p_name: name, p_id: id });
+  async function load() {
+    const rows = await rpc("todo_board_load");
+    state = {};
+    for (const r of rows) bucket(r.name)[r.id] = r.data;
+    return rows;
+  }
 
-  const { data: rows, error } = await sb.from("todo_board_docs").select("name,id,data").eq("user_id", uid);
-  if (error) throw error;
-  for (const r of rows) bucket(r.name)[r.id] = r.data;
-  sb.channel("todo_board_docs:" + uid)
-    .on("postgres_changes", { event: "*", schema: "public", table: "todo_board_docs" }, (p) => {
-      const r = p.eventType === "DELETE" ? p.old : p.new;
-      if (r.user_id !== uid) return;
-      if (p.eventType === "DELETE") delete bucket(r.name)[r.id];
-      else bucket(r.name)[r.id] = r.data;
-      emit(r.name);
-    })
-    .subscribe();
+  const rows = await load();
+  document.addEventListener("visibilitychange", async () => {
+    if (document.visibilityState !== "visible") return;
+    try { await load(); for (const name in listeners) emit(name); } catch {}
+  });
 
   function docRef(name, id) {
     return {
@@ -887,13 +888,16 @@ let day = ymd(new Date());
 setInterval(() => { const d = ymd(new Date()); if (d !== day) { day = d; render(); } }, 60000);
 
 /* ---------- 로그인 ---------- */
-async function startBoard(uid) {
+async function startBoard(token) {
   $("login").hidden = true;
   $("board").hidden = false;
   $("logoutBtn").hidden = false;
   setStatus("불러오는 중…");
-  try { db = await makeDb(uid); }
-  catch { setStatus("불러오지 못했습니다. 새로고침해 주세요.", true); return; }
+  try { db = await makeDb(token); }
+  catch (e) {
+    if (e && /bad_token/.test(e.message)) { localStorage.removeItem(TOKEN_KEY); showLogin(); return; }
+    setStatus("불러오지 못했습니다. 새로고침해 주세요.", true); return;
+  }
   // 예전 localStorage 판에 있던 할 일은 서버가 비어 있을 때 한 번 올리고 지운다
   const old = store.get(OLD_DATA_KEY, null);
   if (old && db.isEmpty() && await write(() => db.merge(old))) localStorage.removeItem(OLD_DATA_KEY);
@@ -915,34 +919,30 @@ function showLogin() {
   $("logoutBtn").hidden = true;
   $("login").hidden = false;
 }
-const AUTH_MSG = {
-  invalid_credentials: "이메일이나 비밀번호가 맞지 않습니다.",
-  user_already_exists: "이미 가입한 이메일입니다. 로그인을 눌러 주세요.",
-  weak_password: "비밀번호를 6자 이상으로 정해 주세요.",
-  email_not_confirmed: "메일 인증이 아직 안 된 계정입니다.",
-};
+const AUTH_MSG = { username_taken: "이미 있는 아이디입니다.", bad_login: "아이디나 비밀번호가 맞지 않습니다." };
 async function auth(signup) {
   const form = $("login");
-  if (!form.reportValidity()) return;
   const msg = $("loginMsg");
   msg.hidden = true;
   for (const b of form.querySelectorAll("button")) b.disabled = true;
-  const cred = { email: $("loginEmail").value.trim(), password: $("loginPw").value };
-  const { data, error } = signup ? await sb.auth.signUp(cred) : await sb.auth.signInWithPassword(cred);
+  const { data: token, error } = await sb.rpc(signup ? "todo_board_signup" : "todo_board_login",
+    { p_username: $("loginId").value.trim(), p_password: $("loginPw").value });
   for (const b of form.querySelectorAll("button")) b.disabled = false;
-  // 가입되면 onAuthStateChange가 보드를 연다
-  if (error) { msg.textContent = AUTH_MSG[error.code] || error.message; msg.hidden = false; }
-  else if (signup && !data.session) { msg.textContent = "가입했지만 메일 인증이 켜져 있어 바로 로그인되지 않았습니다."; msg.hidden = false; }
+  if (error) { msg.textContent = AUTH_MSG[error.message] || error.message; msg.hidden = false; return; }
+  localStorage.setItem(TOKEN_KEY, token);
+  startBoard(token);
 }
 $("login").addEventListener("submit", (e) => { e.preventDefault(); auth(false); });
 $("signupBtn").addEventListener("click", () => auth(true));
-$("logoutBtn").addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
-
-let started = false;
-sb.auth.onAuthStateChange((event, session) => {
-  if (session && !started) { started = true; setTimeout(() => startBoard(session.user.id)); } // 콜백 안에서 바로 sb를 부르면 막힐 수 있음
-  else if (!session && event !== "TOKEN_REFRESHED") showLogin();
+$("logoutBtn").addEventListener("click", async () => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_KEY);
+  await sb.rpc("todo_board_logout", { p_token: token });
+  location.reload();
 });
+
+const savedToken = localStorage.getItem(TOKEN_KEY);
+if (savedToken) startBoard(savedToken); else showLogin();
 </script>
 
 </body>

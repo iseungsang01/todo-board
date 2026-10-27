@@ -3,7 +3,7 @@
 분류별로 접고 펴는 개인 할일판. 정적 페이지 하나로 되어 있고 GitHub Pages에서 바로 연다.
 
 - 주소: https://iseungsang01.github.io/todo-board/
-- 저장: Supabase. 화면에서 이메일·비밀번호로 회원가입하면 바로 로그인되고(메일 인증 꺼 둠), 로그인하면 어느 기기에서든 같은 목록이 보이고, 다른 기기에서 바꾼 것은 바로 따라온다. **내보내기**/**가져오기**는 JSON 백업용.
+- 저장: Supabase. 화면에서 아이디·비밀번호로 회원가입하면 바로 로그인되고, 어느 기기에서든 같은 목록이 보인다. 다른 기기에서 바꾼 것은 그 창으로 돌아올 때 다시 불러온다. **내보내기**/**가져오기**는 JSON 백업용.
 - 휴대폰에서는 Chrome 메뉴의 "홈 화면에 추가"로 앱처럼 띄울 수 있다.
 
 ## 쓰는 법
@@ -22,9 +22,9 @@
 
 ### Supabase
 
-- planner 프로젝트(`gznuqhjenzeucpmonesl`)를 같이 쓴다. 할일판 데이터는 `todo_board_docs` 표 하나에만 있고, 로그인 사용자만 planner와 공유한다.
-- 표·정책은 `schema.sql`. 새로 만들 때는 SQL Editor에서 실행한다.
-- Authentication → URL Configuration의 Redirect URLs에 `https://iseungsang01.github.io/todo-board/`와 `http://localhost:8765/`가 들어 있다. Site URL은 planner용이라 건드리지 않는다.
-- `index.html`의 anon key는 공개용이라 커밋해도 된다(데이터는 RLS로 본인 것만 보인다).
+- planner 프로젝트(`gznuqhjenzeucpmonesl`)에 얹혀 있지만 planner와 섞이지 않는다. Supabase Auth(사용자 목록·메일 설정)는 쓰지 않고, `todo_board_users`/`todo_board_sessions`/`todo_board_docs` 표와 `todo_board_*` 함수만 쓴다.
+- 표는 RLS만 켜고 정책이 없어 직접은 못 읽는다. 아이디·비밀번호 확인과 읽기·쓰기는 모두 함수(security definer) 안에서 한다. 정의는 `schema.sql`.
+- `todo_board_docs_old`는 Supabase Auth를 쓰던 이전 판의 표(빈 분류 한 줄)라 지워도 된다.
+- `index.html`의 anon key는 공개용이라 커밋해도 된다.
 
 예전 localStorage 판에서 쓰던 할 일은 처음 로그인했을 때 서버가 비어 있으면 자동으로 올라간다.
