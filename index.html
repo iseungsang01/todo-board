@@ -88,7 +88,6 @@ img { max-width: 100%; }
 }
 header.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 2px; }
 .top h1 { font-size: 22px; margin: 0; }
-.top .date { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
 .top #logoutBtn { margin-left: auto; font-size: 13px; }
 .board { display: flex; flex-direction: column; gap: 12px; }
 .login { background: var(--surface); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 3px rgba(28,33,48,.08); }
@@ -231,7 +230,6 @@ textarea.text:focus { outline: none; background: var(--bg); }
 <div class="wrap">
   <header class="top">
     <h1>할일판</h1>
-    <span class="date" id="today"></span>
     <button class="ghost" id="logoutBtn" type="button" hidden>로그아웃</button>
   </header>
 
@@ -880,11 +878,9 @@ if (window.Sortable) {
   Sortable.create($("groups"), { ...common, draggable: "details.group[data-cat]", handle: ".handle" });
 }
 
-const now = new Date();
-$("today").textContent = pad(now.getMonth() + 1) + "." + pad(now.getDate()) + " " + "일월화수목금토"[now.getDay()];
 // 자정이 지나면 D-day를 다시 계산
-setInterval(() => { const d = ymd(new Date()); if (d !== $("today").dataset.d) { $("today").dataset.d = d; render(); } }, 60000);
-$("today").dataset.d = ymd(now);
+let day = ymd(new Date());
+setInterval(() => { const d = ymd(new Date()); if (d !== day) { day = d; render(); } }, 60000);
 
 /* ---------- 로그인 ---------- */
 async function startBoard(uid) {
