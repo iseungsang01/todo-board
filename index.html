@@ -91,8 +91,10 @@ header.top { display: flex; align-items: baseline; justify-content: space-betwee
 .top #logoutBtn { margin-left: auto; font-size: 13px; }
 .board { display: flex; flex-direction: column; gap: 12px; }
 .login { background: var(--surface); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 1px 3px rgba(28,33,48,.08); }
-.login p { margin: 0; color: var(--muted); font-size: 14px; }
-.login input { flex: 1; min-width: 0; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid transparent; border-radius: 10px; padding: 9px 12px; outline: none; }
+.login p { margin: 0; color: var(--late); font-size: 14px; }
+.login .inrow button { flex: 1; padding: 9px 0; }
+.login #signupBtn { background: var(--surface); color: var(--fg); border-color: var(--line); }
+.login input { min-width: 0; font: inherit; color: var(--fg); background: var(--bg); border: 2px solid transparent; border-radius: 10px; padding: 9px 12px; outline: none; }
 .login input:focus { border-color: var(--accent); }
 .status { color: var(--muted); font-size: 13px; }
 .status.err { color: var(--late); }
@@ -234,11 +236,13 @@ textarea.text:focus { outline: none; background: var(--bg); }
   </header>
 
   <form class="login" id="login" hidden>
-    <p>이메일로 로그인 링크를 보냅니다. 메일의 링크를 누르면 이 화면으로 돌아옵니다.</p>
+    <input id="loginEmail" type="email" required autocomplete="email" placeholder="이메일" aria-label="이메일">
+    <input id="loginPw" type="password" required minlength="6" autocomplete="current-password" placeholder="비밀번호 (6자 이상)" aria-label="비밀번호">
     <div class="inrow">
-      <input id="loginEmail" type="email" required autocomplete="email" placeholder="이메일" aria-label="이메일">
-      <button class="primary" id="loginBtn" type="submit">링크 보내기</button>
+      <button class="primary" id="loginBtn" type="submit">로그인</button>
+      <button id="signupBtn" type="button">회원가입</button>
     </div>
+    <p id="loginMsg" hidden></p>
   </form>
 
   <div class="board" id="board" hidden>
@@ -911,18 +915,27 @@ function showLogin() {
   $("logoutBtn").hidden = true;
   $("login").hidden = false;
 }
-$("login").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const btn = $("loginBtn");
-  btn.disabled = true;
-  const { error } = await sb.auth.signInWithOtp({
-    email: $("loginEmail").value.trim(),
-    options: { emailRedirectTo: location.origin + location.pathname },
-  });
-  btn.disabled = false;
-  btn.textContent = error ? "다시 보내기" : "보냈습니다 · 메일 확인";
-  if (error) $("login").querySelector("p").textContent = "보내지 못했습니다: " + error.message;
-});
+const AUTH_MSG = {
+  invalid_credentials: "이메일이나 비밀번호가 맞지 않습니다.",
+  user_already_exists: "이미 가입한 이메일입니다. 로그인을 눌러 주세요.",
+  weak_password: "비밀번호를 6자 이상으로 정해 주세요.",
+  email_not_confirmed: "메일 인증이 아직 안 된 계정입니다.",
+};
+async function auth(signup) {
+  const form = $("login");
+  if (!form.reportValidity()) return;
+  const msg = $("loginMsg");
+  msg.hidden = true;
+  for (const b of form.querySelectorAll("button")) b.disabled = true;
+  const cred = { email: $("loginEmail").value.trim(), password: $("loginPw").value };
+  const { data, error } = signup ? await sb.auth.signUp(cred) : await sb.auth.signInWithPassword(cred);
+  for (const b of form.querySelectorAll("button")) b.disabled = false;
+  // 가입되면 onAuthStateChange가 보드를 연다
+  if (error) { msg.textContent = AUTH_MSG[error.code] || error.message; msg.hidden = false; }
+  else if (signup && !data.session) { msg.textContent = "가입했지만 메일 인증이 켜져 있어 바로 로그인되지 않았습니다."; msg.hidden = false; }
+}
+$("login").addEventListener("submit", (e) => { e.preventDefault(); auth(false); });
+$("signupBtn").addEventListener("click", () => auth(true));
 $("logoutBtn").addEventListener("click", async () => { await sb.auth.signOut(); location.reload(); });
 
 let started = false;
