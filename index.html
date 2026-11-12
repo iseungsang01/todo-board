@@ -434,23 +434,27 @@ const WD = { "일": 0, "월": 1, "화": 2, "수": 3, "목": 4, "금": 5, "토": 
 // 3일 뒤(후), D-3, (이번주·다음주) 금 / 금요일. 두 달 넘게 지난 월/일은 내년으로 본다.
 function parseLine(line) {
   const t0 = today0();
+  // 날짜 말 앞뒤 경계: 띄어쓰기·줄 끝 말고도 (11/30), [내일], 11/30(월), '11/30,' 처럼 괄호·요일·문장부호가 붙어도 된다
+  const B = String.raw`(?:^|\s|(?=[(\[]))[(\[]?`;
+  const E = String.raw`(?:까지)?(?:\s?\([일월화수목금토]\))?[)\]]?(?=\s|$|[,.!?·])`;
+  const R = (src) => new RegExp(src.replaceAll("<B>", B).replaceAll("<E>", E));
   const rules = [
-    [/(?:^|\s)~?(\d{4})-(\d{1,2})-(\d{1,2})(?=\s|$)/, m => new Date(+m[1], +m[2] - 1, +m[3])],
-    [/(?:^|\s)~?(\d{1,2})\/(\d{1,2})(?=\s|$)/, m => monthDay(+m[1], +m[2])],
-    [/(?:^|\s)~?(\d{1,2})월\s?(\d{1,2})일(?:까지)?(?=\s|$)/, m => monthDay(+m[1], +m[2])],
-    [/(?:^|\s)(오늘|내일|모레|글피)(?:까지)?(?=\s|$)/, m => addDays(t0, { "오늘": 0, "내일": 1, "모레": 2, "글피": 3 }[m[1]])],
-    [/(?:^|\s)(\d{1,3})일\s?(?:뒤|후)(?:까지)?(?=\s|$)/, m => addDays(t0, +m[1])],
-    [/(?:^|\s)[dD]-(\d{1,3})(?=\s|$)/, m => addDays(t0, +m[1])],
+    [R(String.raw`<B>~?(\d{4})-(\d{1,2})-(\d{1,2})<E>`), m => new Date(+m[1], +m[2] - 1, +m[3])],
+    [R(String.raw`<B>~?(\d{1,2})\/(\d{1,2})<E>`), m => monthDay(+m[1], +m[2])],
+    [R(String.raw`<B>~?(\d{1,2})월\s?(\d{1,2})일(?:까지)?<E>`), m => monthDay(+m[1], +m[2])],
+    [R(String.raw`<B>(오늘|내일|모레|글피)(?:까지)?<E>`), m => addDays(t0, { "오늘": 0, "내일": 1, "모레": 2, "글피": 3 }[m[1]])],
+    [R(String.raw`<B>(\d{1,3})일\s?(?:뒤|후)(?:까지)?<E>`), m => addDays(t0, +m[1])],
+    [R(String.raw`<B>[dD]-(\d{1,3})<E>`), m => addDays(t0, +m[1])],
     // 요일 한 글자는 흔한 글자라 '이번주/다음주'가 앞에 붙거나 '요일'까지 쓴 경우만 날짜로 본다
-    [/(?:^|\s)(이번\s?주|다음\s?주|담주)\s?([일월화수목금토])(?:요일)?(?:까지)?(?=\s|$)/, m => weekday(m[1], m[2])],
-    [/(?:^|\s)([일월화수목금토])요일(?:까지)?(?=\s|$)/, m => weekday("", m[1])],
+    [R(String.raw`<B>(이번\s?주|다음\s?주|담주)\s?([일월화수목금토])(?:요일)?(?:까지)?<E>`), m => weekday(m[1], m[2])],
+    [R(String.raw`<B>([일월화수목금토])요일(?:까지)?<E>`), m => weekday("", m[1])],
   ];
   for (const [re, fn] of rules) {
     const m = line.match(re);
     if (!m) continue;
     const d = fn(m);
     if (!d || isNaN(d)) continue;
-    return { text: line.replace(m[0], " ").replace(/\s+/g, " ").trim(), due: ymd(d) };
+    return { text: line.replace(m[0], " ").replace(/\s+/g, " ").trim().replace(/^[,.·]\s*|\s*[,·]$/g, ""), due: ymd(d) };
   }
   return { text: line.replace(/\s+/g, " ").trim(), due: "" };
   function monthDay(mo, da) {
