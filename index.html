@@ -136,6 +136,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus
 
 /* 묶음 */
 .groups { display: flex; flex-direction: column; gap: 10px; }
+.minis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.minis details.group[open] { grid-column: 1 / -1; }
+.minis details.group:not([open]) > summary { gap: 7px; padding: 8px 10px; }
+.minis details.group:not([open]) .gname { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.minis details.group:not([open]) :is(.caret, .gnext, .gren, .gdel, .prog) { display: none; }
 details.group { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 details.group.focus { border-color: var(--late); }
 details.group > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 11px 10px 11px 12px; user-select: none; }
@@ -287,6 +292,7 @@ let renamingCat = null;
 let subAdding = null;
 const drafts = {}; // 분류별로 쓰다 만 할 일
 let dateOpen = null;
+let miniOpen = null; // 할 일 없는 분류(위쪽 3칸 격자) 중 펼친 것
 let panelOpen = null;
 let query = "";
 let undoStack = null, toastTimer = null;
@@ -861,14 +867,21 @@ function groupView(name, label, items, opts) {
   const total = items.length, doneCount = items.filter(t => t.done).length;
   const next = open.find(t => t.due);
   const n = next ? daysLeft(next.due) : null;
-  const d = el("details", { class: "group" + (opts.focus ? " focus" : ""), style: opts.focus ? null : cstyle(name), "data-cat": opts.movable ? name : null, open: (query || !closed.has(name)) ? "" : false });
+  const isOpen = opts.mini ? miniOpen === name : query || !closed.has(name);
+  const d = el("details", { class: "group" + (opts.focus ? " focus" : "") + (opts.mini ? " mini" : ""), style: opts.focus ? null : cstyle(name),
+    "data-cat": opts.movable && !opts.mini ? name : null, open: isOpen ? "" : false });
   d.addEventListener("toggle", () => {
+    if (opts.mini) { // 하나만 펼치고, 펼친 칸은 한 줄을 다 쓴다
+      const want = d.open ? name : (miniOpen === name ? null : miniOpen);
+      if (want !== miniOpen) { miniOpen = want; render(); }
+      return;
+    }
     if (query) return;
     if (d.open) closed.delete(name); else closed.add(name);
     store.set("closedGroups", [...closed]);
   });
   const summary = el("summary", null,
-    opts.movable ? el("span", { class: "handle", title: "끌어서 순서 바꾸기", "aria-hidden": "true", onclick: (e) => e.preventDefault() }, "⠿") : null,
+    opts.movable && !opts.mini ? el("span", { class: "handle", title: "끌어서 순서 바꾸기", "aria-hidden": "true", onclick: (e) => e.preventDefault() }, "⠿") : null,
     el("span", { class: "caret", "aria-hidden": "true" }),
     opts.movable ? el("button", { class: "dot", type: "button", title: "눌러서 색 바꾸기", "aria-label": name + " 색 바꾸기 (지금 " + PALETTE_KO[colorOf(name)] + ")",
       onclick: (e) => { e.preventDefault(); e.stopPropagation(); cycleColor(name); } })
@@ -909,10 +922,14 @@ function render() {
   const byCat = new Map(cats.map(c => [c, []]));
   const none = [];
   for (const t of shown) { const c = catOf(t); (c === NONE ? none : byCat.get(c)).push(t); }
+  // 할 일이 남지 않은 분류는 위쪽 3칸 격자에 작게 몰아 둔다
+  const minis = query ? null : el("div", { class: "minis" });
   for (const [c, items] of byCat) {
     if (query && !items.length) continue;
+    if (minis && !items.some(t => !t.done)) { minis.append(groupView(c, c, items, { movable: true, mini: true })); continue; }
     box.append(groupView(c, c, items, { movable: !query }));
   }
+  if (minis && minis.children.length) box.insertBefore(minis, box.querySelector("details.group:not(.focus)"));
   if (none.length) box.append(groupView(NONE, NONE, none, {}));
   if (!box.children.length) {
     box.append(el("div", { class: "empty" }, query ? "'" + query + "'에 맞는 할 일이 없습니다."
@@ -930,8 +947,10 @@ document.addEventListener("focusout", (e) => { if (e.target.closest && e.target.
 document.addEventListener("click", (e) => { if (armedCat && !e.target.closest(".gdel")) { armedCat = null; render(); } });
 
 function reorderFrom(container) {
-  const order = [...container.querySelectorAll("[data-cat]")].map(n => n.dataset.cat);
-  const next = [...order.filter(c => cats.includes(c)), ...cats.filter(c => !order.includes(c))];
+  // 끌 수 있는 건 할 일 있는 분류뿐이라, 그 자리끼리만 순서를 바꾸고 빈 분류 자리는 그대로 둔다
+  const order = [...container.querySelectorAll(":scope > [data-cat]")].map(n => n.dataset.cat).filter(c => cats.includes(c));
+  let i = 0;
+  const next = cats.map(c => order.includes(c) ? order[i++] : c);
   dragging = false;
   if (next.join("\u0000") === cats.join("\u0000")) { render(); return; }
   saveCats(next);
