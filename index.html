@@ -192,6 +192,9 @@ button.dot { cursor: pointer; }
 .swipe .under.left { background: var(--late-soft); color: var(--late); }
 .row { position: relative; background: var(--surface); display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; padding: 8px 6px 8px 12px; touch-action: pan-y; }
 .row.late { background: var(--late-soft); }
+/* 왼쪽 끝 ⠿를 끌면 할 일 순서·분류가 바뀐다 */
+.row .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 11px; display: grid; place-items: center; color: var(--muted); font-size: 11px; cursor: grab; touch-action: none; opacity: .35; }
+@media (hover: hover) { .row .grip { opacity: 0; } .row:hover .grip { opacity: 1; } }
 .check { width: 22px; height: 22px; margin-top: 3px; border-radius: 6px; padding: 0; border: 2px solid var(--muted); background: transparent; display: grid; place-items: center; flex: none; }
 .done > .check { background: var(--ok); border-color: var(--ok); }
 .done > .check::after { content: ""; width: 6px; height: 11px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
@@ -740,7 +743,7 @@ function attachSwipe(wrapEl, rowEl, t) {
   let x0 = 0, y0 = 0, dx = 0, active = false, decided = false, pid = null;
   const right = wrapEl.querySelector(".under.right"), left = wrapEl.querySelector(".under.left");
   rowEl.addEventListener("pointerdown", (e) => {
-    if (e.pointerType !== "touch" || e.target.closest("button, a, input, .bullet")) return;
+    if (e.pointerType !== "touch" || e.target.closest("button, a, input, .bullet, .grip")) return;
     x0 = e.clientX; y0 = e.clientY; dx = 0; active = true; decided = false; pid = e.pointerId;
   });
   rowEl.addEventListener("pointermove", (e) => {
@@ -963,6 +966,7 @@ function rowView(t, showCat) {
     el("span", { class: "cat", style: cstyle(catOf(t)) }, catOf(t))) : null;
 
   const row = el("div", { class: "row" + (t.done ? " done" : "") + (late ? " late" : "") },
+    !t.done && !showCat ? el("span", { class: "grip", title: "끌어서 순서·분류 바꾸기", "aria-hidden": "true" }, "⠿") : null,
     el("button", { class: "check", type: "button", "aria-label": t.done ? "완료 취소" : "완료", onclick: () => toggle(t) }),
     el("div", { class: "body" }, el("div", { class: "title" }, textBox(t.text, (v, final) => saveText(t, v, final)), subAddBtn(t)), meta, subsView(t, t.sub, 1, inst)),
     el("div", { class: "side" }, dateCtl,
@@ -974,7 +978,7 @@ function rowView(t, showCat) {
         el("button", { class: "ic x", type: "button", "aria-label": "지우기", onclick: () => removeMany([t]) }, "×")))
   );
   if (panelOpen === t.id) row.append(panelView(t));
-  const wrapEl = el("div", { class: "swipe" },
+  const wrapEl = el("div", { class: "swipe", "data-id": !t.done && !showCat ? t.id : null },
     el("div", { class: "under right", hidden: "" }, t.done ? "완료 취소" : "완료"),
     el("div", { class: "under left", hidden: "" }, el("span"), "지우기"),
     row);
@@ -986,7 +990,22 @@ function byDue(a, b) {
   if (!!a.star !== !!b.star) return a.star ? -1 : 1;
   if (a.due && b.due && a.due !== b.due) return a.due < b.due ? -1 : 1;
   if (!!a.due !== !!b.due) return a.due ? -1 : 1;
-  return (a.createdAt || 0) - (b.createdAt || 0);
+  return orderKey(a) - orderKey(b);
+}
+// 같은 ★·마감일끼리는 끈 자리(pos), 끈 적 없으면 만든 때 순
+function orderKey(t) { return t.pos ?? t.createdAt ?? 0; }
+const sameRank = (a, b) => !!a.star === !!b.star && (a.due || "") === (b.due || "");
+// 할 일을 끌어 놓은 자리로: 놓은 분류로 옮기고, 같은 ★·마감일 무리 안에서 앞뒤 사이에 끼운다
+function dropTask(e) {
+  const t = tasks.find(x => x.id === e.item.dataset.id);
+  if (!t) return;
+  const cat = e.to.dataset.cat === NONE ? "" : e.to.dataset.cat;
+  const peers = [...e.to.querySelectorAll(":scope > .swipe[data-id]")]
+    .map(n => n === e.item ? t : tasks.find(x => x.id === n.dataset.id))
+    .filter(x => x && !x.done && sameRank(x, t));
+  const i = peers.indexOf(t), prev = peers[i - 1], next = peers[i + 1];
+  const pos = prev && next ? (orderKey(prev) + orderKey(next)) / 2 : prev ? orderKey(prev) + 1 : next ? orderKey(next) - 1 : orderKey(t);
+  patch(t, { cat, pos });
 }
 
 function groupView(name, label, items, opts) {
@@ -1023,7 +1042,7 @@ function groupView(name, label, items, opts) {
       onclick: (e) => { e.preventDefault(); e.stopPropagation(); deleteCat(name); } },
       armedCat === name ? (opts.mini ? "삭제?" : "한 번 더 누르면 분류 삭제") : "×") : null
   );
-  const body = el("div", { class: "gbody" });
+  const body = el("div", { class: "gbody", "data-cat": opts.focus ? null : name });
   if (query && !open.length && !done.length) body.append(el("div", { class: "gempty" }, "검색 결과가 없습니다."));
   open.forEach(t => body.append(rowView(t, opts.focus)));
   if (!opts.focus && !query && (opts.mini || !open.length || taskAdding === name || drafts[name])) body.append(taskAddBox(name));
@@ -1068,6 +1087,10 @@ function render() {
   if (window.Sortable) for (const n of box.querySelectorAll(".cards")) {
     Sortable.create(n, { animation: 150, ghostClass: "sort-ghost", chosenClass: "sort-chosen", draggable: "details.group[data-cat]", handle: ".handle",
       onStart: () => { dragging = true; }, onEnd: () => reorderFrom($("groups")) });
+  }
+  if (window.Sortable) for (const n of box.querySelectorAll(".gbody[data-cat]")) {
+    Sortable.create(n, { group: "tasks", animation: 150, ghostClass: "sort-ghost", draggable: ".swipe[data-id]", handle: ".grip", forceFallback: true,
+      onStart: () => { dragging = true; }, onEnd: (e) => { dragging = false; dropTask(e); render(); } });
   }
   if (window.Sortable) for (const n of box.querySelectorAll(".subs[data-tid]")) {
     Sortable.create(n, { animation: 150, ghostClass: "sort-ghost", draggable: ".subitem", handle: ".bullet", forceFallback: true,
