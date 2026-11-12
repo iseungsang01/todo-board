@@ -137,10 +137,11 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus
 /* 묶음 */
 .groups { display: flex; flex-direction: column; gap: 10px; }
 .minis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.minis details.group[open] { grid-column: 1 / -1; }
-.minis details.group:not([open]) > summary { gap: 7px; padding: 8px 10px; }
-.minis details.group:not([open]) .gname { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.minis details.group:not([open]) :is(.caret, .gnext, .gren, .gdel, .prog) { display: none; }
+.minis details.group { min-width: 0; }
+.minis summary { gap: 6px; padding: 9px 6px 9px 10px; }
+.minis .gname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.minis :is(.gren, .gdel) { padding: 2px 4px; flex: none; }
+.minis .taskadd { width: calc(100% - 12px); margin: 2px 6px 6px; }
 details.group { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 details.group.focus { border-color: var(--late); }
 details.group > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 11px 10px 11px 12px; user-select: none; }
@@ -292,7 +293,6 @@ let renamingCat = null;
 let subAdding = null;
 const drafts = {}; // 분류별로 쓰다 만 할 일
 let dateOpen = null;
-let miniOpen = null; // 할 일 없는 분류(위쪽 3칸 격자) 중 펼친 것
 let panelOpen = null;
 let query = "";
 let undoStack = null, toastTimer = null;
@@ -867,15 +867,9 @@ function groupView(name, label, items, opts) {
   const total = items.length, doneCount = items.filter(t => t.done).length;
   const next = open.find(t => t.due);
   const n = next ? daysLeft(next.due) : null;
-  const isOpen = opts.mini ? miniOpen === name : query || !closed.has(name);
-  const d = el("details", { class: "group" + (opts.focus ? " focus" : "") + (opts.mini ? " mini" : ""), style: opts.focus ? null : cstyle(name),
-    "data-cat": opts.movable && !opts.mini ? name : null, open: isOpen ? "" : false });
+  const d = el("details", { class: "group" + (opts.focus ? " focus" : ""), style: opts.focus ? null : cstyle(name),
+    "data-cat": opts.movable && !opts.mini ? name : null, open: (query || !closed.has(name)) ? "" : false });
   d.addEventListener("toggle", () => {
-    if (opts.mini) { // 하나만 펼치고, 펼친 칸은 한 줄을 다 쓴다
-      const want = d.open ? name : (miniOpen === name ? null : miniOpen);
-      if (want !== miniOpen) { miniOpen = want; render(); }
-      return;
-    }
     if (query) return;
     if (d.open) closed.delete(name); else closed.add(name);
     store.set("closedGroups", [...closed]);
@@ -895,7 +889,7 @@ function groupView(name, label, items, opts) {
     opts.movable ? el("button", { type: "button", class: "gdel" + (armedCat === name ? " armed" : ""),
       title: "분류 지우기 (할 일은 미분류로 옮겨짐)",
       onclick: (e) => { e.preventDefault(); e.stopPropagation(); deleteCat(name); } },
-      armedCat === name ? "한 번 더 누르면 분류 삭제" : "분류 삭제") : null
+      armedCat === name ? (opts.mini ? "삭제?" : "한 번 더 누르면 분류 삭제") : opts.mini ? "×" : "분류 삭제") : null
   );
   const body = el("div", { class: "gbody" });
   if (query && !open.length && !done.length) body.append(el("div", { class: "gempty" }, "검색 결과가 없습니다."));
