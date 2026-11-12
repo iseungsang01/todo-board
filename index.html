@@ -950,7 +950,7 @@ function render() {
   }
   if (!query) box.append(catAddView());
   if (window.Sortable) for (const n of box.querySelectorAll(".subs[data-tid]")) {
-    Sortable.create(n, { animation: 150, ghostClass: "sort-ghost", draggable: ".subitem", handle: ".bullet",
+    Sortable.create(n, { animation: 150, ghostClass: "sort-ghost", draggable: ".subitem", handle: ".bullet", forceFallback: true,
       onStart: () => { dragging = true; }, onEnd: () => { dragging = false; sortSubs(n); render(); } });
   }
 }
