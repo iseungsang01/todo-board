@@ -612,8 +612,10 @@ async function addTasks(name, ta) {
 
 /* ---------- 할 일 조작 ---------- */
 function toggle(t) { const done = !t.done; patch(t, { done, doneAt: done ? Date.now() : null }); render(); }
-function saveText(t, value) {
+function saveText(t, value, final) {
   clearTimeout(saveTimers[t.id]);
+  const p = final ? parseLine(value) : { text: value.trim(), due: "" };
+  if (p.due && p.text) { patch(t, { text: p.text, due: p.due }); render(); return; }
   const text = value.trim();
   if (text === t.text) return;
   if (!text) { removeMany([t]); return; }
@@ -706,8 +708,9 @@ function textBox(value, onSave, cls) {
   const ta = el("textarea", { class: "text" + (cls ? " " + cls : ""), rows: "1", "aria-label": "내용" });
   ta.value = value || "";
   let timer = null;
-  ta.addEventListener("input", () => { grow(ta); clearTimeout(timer); timer = setTimeout(() => onSave(ta.value), 1200); });
-  ta.addEventListener("blur", () => { clearTimeout(timer); onSave(ta.value); });
+  ta.addEventListener("input", () => { grow(ta); clearTimeout(timer); timer = setTimeout(() => onSave(ta.value, false), 1200); });
+  // 다 쓰고 나갈 때(final)만 글 속 날짜 말을 마감일로 뺀다 — 쓰는 도중 11/2 같은 반쪽 날짜가 잡히지 않게
+  ta.addEventListener("blur", () => { clearTimeout(timer); onSave(ta.value, true); });
   ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ta.blur(); } });
   requestAnimationFrame(() => grow(ta));
   return ta;
@@ -762,12 +765,14 @@ function subsView(t, list, depth, inst) {
     const kids = s.sub && s.sub.length ? subsView(t, s.sub, depth + 1, inst) : null;
     box.append(el("div", { class: "sub" },
       el("span", { class: "bullet", "aria-hidden": "true" }),
-      textBox(s.text, (v) => {
+      textBox(s.text, (v, final) => {
+        const p = final ? parseLine(v) : null;
+        if (p && p.due && p.text) { saveSubs(t, mapSub(t.sub, s.id, (x) => ({ ...x, text: p.text, due: p.due }))); render(); return; }
         const text = v.trim();
         if (text === s.text) return;
         saveSubs(t, mapSub(t.sub, s.id, (x) => text ? { ...x, text } : null));
       }),
-      // 날짜가 있으면 늘 보이고, 없으면 ⋯를 연 동안만 "+날짜"를 보인다 (새로 달 때 글에 내일·11/20을 쓰면 들어간다)
+      // 날짜가 있으면 늘 보이고, 없으면 ⋯를 연 동안만 "+날짜"를 보인다 (글에 내일·11/20을 쓰고 나가면 들어간다)
       s.due || editing ? dateControl("sub:" + s.id + inst, s.due, t.done, (due) => saveSubs(t, mapSub(t.sub, s.id, (x) => ({ ...x, due }))), "sm") : null,
       depth < SUB_DEPTH ? subAddBtn(t, s.id) : el("span"),
       editing ? el("button", { class: "ic small x", type: "button", "aria-label": "하위 항목 지우기",
@@ -825,7 +830,7 @@ function rowView(t, showCat) {
 
   const row = el("div", { class: "row" + (t.done ? " done" : "") + (late ? " late" : "") },
     el("button", { class: "check", type: "button", "aria-label": t.done ? "완료 취소" : "완료", onclick: () => toggle(t) }),
-    el("div", { class: "body" }, el("div", { class: "title" }, textBox(t.text, (v) => saveText(t, v)), subAddBtn(t)), meta, subsView(t, t.sub, 1, inst)),
+    el("div", { class: "body" }, el("div", { class: "title" }, textBox(t.text, (v, final) => saveText(t, v, final)), subAddBtn(t)), meta, subsView(t, t.sub, 1, inst)),
     el("div", { class: "side" }, dateCtl,
       el("div", { class: "acts" },
         el("button", { class: "ic star" + (t.star ? " on" : ""), type: "button", "aria-label": t.star ? "중요 해제" : "중요 표시", "aria-pressed": String(!!t.star),
