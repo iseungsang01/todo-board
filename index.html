@@ -81,7 +81,7 @@ img { max-width: 100%; }
 .wrap {
   max-width: 680px; margin: 0 auto;
   padding-top: calc(18px + env(safe-area-inset-top, 0px));
-  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   display: flex; flex-direction: column; gap: 12px;
@@ -274,10 +274,11 @@ textarea.text { line-height: 1.35; padding: 1px 4px; }
 .subs { gap: 0; padding-top: 0; }
 .taskadd { margin: 0 10px 3px; width: calc(100% - 20px); padding: 3px 8px; }
 .donebar { padding: 3px 8px 3px 10px; }
+.gadd { color: var(--muted); }
 /* 넓은 화면에서는 폭을 넓히고 분류를 여러 단으로 흘려 한 화면에 더 많이 */
-@media (min-width: 1000px) {
-  .wrap { max-width: 1440px; padding-left: 24px; padding-right: 24px; }
-  .groups { display: block; column-width: 400px; column-gap: 10px; }
+@media (min-width: 720px) {
+  .wrap { max-width: 1440px; padding-left: 20px; padding-right: 20px; }
+  .groups { display: block; column-width: 340px; column-gap: 10px; }
   .groups > * { break-inside: avoid; margin-bottom: 8px; }
   .groups > :is(.minis, details.group.focus) { column-span: all; }
   .minis { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
@@ -340,6 +341,7 @@ let renamingCat = null;
 let subAdding = null;
 const drafts = {}; // 분류별로 쓰다 만 할 일
 let dateOpen = null;
+let taskAdding = null; // 할 일이 있는 분류는 머리줄 + 를 눌렀을 때만 입력칸을 연다
 let panelOpen = null;
 let query = "";
 let undoStack = null, toastTimer = null;
@@ -645,6 +647,7 @@ function taskAddBox(name) {
   ta.dataset.taskadd = name;
   ta.value = drafts[name] || "";
   ta.addEventListener("input", () => { drafts[name] = ta.value; grow(ta); });
+  ta.addEventListener("blur", () => { if (taskAdding === name && !ta.value.trim()) taskAdding = null; });
   ta.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { ta.blur(); return; }
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); addTasks(name, ta); }
@@ -945,6 +948,10 @@ function groupView(name, label, items, opts) {
       : opts.focus ? null : el("span", { class: "dot", "aria-hidden": "true" }),
     opts.movable && renamingCat === name ? renameBox(name) : el("span", { class: "gname" }, label),
     open.length ? el("span", { class: "gcount" }, String(open.length)) : null,
+    !opts.focus && !opts.mini && !query ? el("button", { type: "button", class: "ic small gadd", title: "할 일 추가", "aria-label": label + "에 할 일 추가",
+      onclick: (e) => { e.preventDefault(); e.stopPropagation(); taskAdding = name;
+        if (closed.delete(name)) store.set("closedGroups", [...closed]);
+        render(); focusTaskAdd(name); } }, "+") : null,
     !opts.focus && total ? el("span", { class: "prog", title: "완료 " + doneCount + "/" + total }, el("i", { style: "width:" + Math.round(doneCount / total * 100) + "%" })) : null,
     next && !opts.focus ? el("span", { class: "dday gnext " + ddayClass(n) }, ddayLabel(n)) : el("span", { class: "gnext" }),
     opts.movable && renamingCat !== name ? el("button", { type: "button", class: "gren", title: "분류 이름 바꾸기", "aria-label": name + " 이름 바꾸기",
@@ -957,7 +964,7 @@ function groupView(name, label, items, opts) {
   const body = el("div", { class: "gbody" });
   if (query && !open.length && !done.length) body.append(el("div", { class: "gempty" }, "검색 결과가 없습니다."));
   open.forEach(t => body.append(rowView(t, opts.focus)));
-  if (!opts.focus && !query) body.append(taskAddBox(name));
+  if (!opts.focus && !query && (opts.mini || !open.length || taskAdding === name || drafts[name])) body.append(taskAddBox(name));
   if (done.length) {
     body.append(el("div", { class: "donebar" }, "완료 " + done.length,
       el("button", { type: "button", class: "ghost", onclick: () => removeMany(items.filter(t => t.done)) }, "완료 모두 지우기")));
