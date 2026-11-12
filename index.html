@@ -152,6 +152,12 @@ button.dot { cursor: pointer; }
 .gdel { padding: 2px 8px; font-size: 12px; border: 0; background: transparent; color: var(--muted); }
 .gren { padding: 2px 6px; font-size: 13px; border: 0; background: transparent; color: var(--muted); }
 .gname-edit { font: inherit; font-weight: 700; color: var(--fg); background: var(--bg); border: 1px solid var(--c, var(--accent)); border-radius: 6px; padding: 1px 8px; width: 9em; min-width: 0; }
+/* 손잡이·이름 바꾸기·삭제는 평소엔 흐리게, 마우스가 있으면 올렸을 때만 보이게 */
+.handle, .gren, .gdel:not(.armed) { opacity: .35; transition: opacity .15s; }
+@media (hover: hover) {
+  .handle, .gren, .gdel:not(.armed) { opacity: 0; }
+  summary:hover :is(.handle, .gren, .gdel), summary:focus-within :is(.handle, .gren, .gdel) { opacity: 1; }
+}
 .gdel.armed { background: var(--late); color: var(--surface); border-radius: 6px; }
 .gbody { border-top: 1px solid var(--line); }
 .gempty { color: var(--muted); font-size: 13px; padding: 10px 14px; }
@@ -575,7 +581,7 @@ function focusCatAdd() { const n = $("newCatInput"); if (n) n.focus(); }
 /* ---------- 입력: 분류 맨 아래 칸 ---------- */
 function focusTaskAdd(name) { const n = document.querySelector('[data-taskadd="' + CSS.escape(name) + '"]'); if (n) { n.focus(); grow(n); } }
 function taskAddBox(name) {
-  const ta = el("textarea", { class: "taskadd", rows: "1", placeholder: "+ 할 일 적기 · 11/12, 내일을 쓰면 마감일", "aria-label": name + "에 할 일 추가" });
+  const ta = el("textarea", { class: "taskadd", rows: "1", placeholder: "+ 할 일", "aria-label": name + "에 할 일 추가" });
   ta.dataset.taskadd = name;
   ta.value = drafts[name] || "";
   ta.addEventListener("input", () => { drafts[name] = ta.value; grow(ta); });
@@ -852,7 +858,7 @@ function groupView(name, label, items, opts) {
       onclick: (e) => { e.preventDefault(); e.stopPropagation(); cycleColor(name); } })
       : opts.focus ? null : el("span", { class: "dot", "aria-hidden": "true" }),
     opts.movable && renamingCat === name ? renameBox(name) : el("span", { class: "gname" }, label),
-    el("span", { class: "gcount" }, String(open.length)),
+    open.length ? el("span", { class: "gcount" }, String(open.length)) : null,
     !opts.focus && total ? el("span", { class: "prog", title: "완료 " + doneCount + "/" + total }, el("i", { style: "width:" + Math.round(doneCount / total * 100) + "%" })) : null,
     next && !opts.focus ? el("span", { class: "dday gnext " + ddayClass(n) }, ddayLabel(n)) : el("span", { class: "gnext" }),
     opts.movable && renamingCat !== name ? el("button", { type: "button", class: "gren", title: "분류 이름 바꾸기", "aria-label": name + " 이름 바꾸기",
