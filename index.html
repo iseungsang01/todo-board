@@ -196,18 +196,21 @@ button.dot { cursor: pointer; }
 .done > .check { background: var(--ok); border-color: var(--ok); }
 .done > .check::after { content: ""; width: 6px; height: 11px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
 .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-textarea.text {
+textarea.text, .text.view {
   font: inherit; color: var(--fg); background: transparent; border: 0; resize: none; overflow: hidden;
   width: 100%; min-width: 0; padding: 2px 4px; border-radius: 5px; line-height: 1.5;
 }
 textarea.text:focus { outline: none; background: var(--bg); }
-.row.done textarea.text { color: var(--muted); text-decoration: line-through; }
+.row.done .text { color: var(--muted); text-decoration: line-through; }
 .meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); padding: 0 4px; }
 .meta a { color: var(--accent); }
 .meta .cat { background: var(--cs, var(--bg)); color: var(--ct, var(--muted)); border-radius: 5px; padding: 0 7px; }
 .subs { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 0 4px; }
 .sub { display: flex; gap: 4px; align-items: flex-start; }
 .sub textarea.text { flex: 1; min-width: 0; }
+/* 링크가 든 글은 평소엔 글로 보여 링크를 누르면 열리고, 그 밖을 누르면 고치는 칸으로 바뀐다 */
+.text.view { display: block; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; flex: 0 1 auto; width: auto; min-width: 3em; max-width: 100%; }
+.text.view a { color: var(--accent); }
 .body .title { display: flex; align-items: flex-start; gap: 2px; }
 .body .title textarea { flex: 1; min-width: 0; }
 @supports (field-sizing: content) { /* 제목 글자 길이만큼만 차지해서 + 가 글자 바로 옆에 붙게 */
@@ -220,7 +223,7 @@ textarea.text:focus { outline: none; background: var(--bg); }
 .sub .bullet { flex: none; width: 12px; height: 23px; display: grid; place-items: center; cursor: grab; touch-action: none; }
 .sub .bullet::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); opacity: .6; }
 .sub .bullet:hover::before { opacity: 1; transform: scale(1.4); }
-.sub textarea.text { font-size: 14px; padding: 1px 4px; }
+.sub .text { font-size: 14px; padding: 1px 4px; }
 .subadd { font: inherit; font-size: 13.5px; color: var(--fg); background: var(--bg); border: 1px dashed var(--line); border-radius: 6px; padding: 4px 8px; width: 100%; min-width: 0; }
 .side { display: flex; align-items: center; gap: 2px; }
 .acts { display: flex; gap: 0; }
@@ -271,7 +274,7 @@ details.group > summary { padding: 6px 8px 6px 10px; gap: 8px; }
 .minis summary { padding: 6px 6px 6px 9px; }
 .row { padding: 2px 4px 2px 10px; gap: 6px; }
 .check { width: 19px; height: 19px; margin-top: 3px; }
-textarea.text { line-height: 1.35; padding: 1px 4px; }
+textarea.text, .text.view { line-height: 1.35; padding: 1px 4px; }
 .ic { width: 24px; height: 24px; font-size: 15px; }
 .ic.small { width: 20px; height: 20px; font-size: 14px; }
 .dday { padding: 1px 6px; }
@@ -769,7 +772,42 @@ function attachSwipe(wrapEl, rowEl, t) {
 }
 
 /* ---------- 그리기 ---------- */
+const URL_RE = /https?:\/\/\S+/g;
 function textBox(value, onSave, cls) {
+  if (!urlOf(value)) return editBox(value, onSave, cls);
+  const view = el("div", { class: "text view" + (cls ? " " + cls : ""), tabindex: "0", role: "button", "aria-label": "내용 고치기" });
+  let last = 0;
+  for (const m of value.matchAll(URL_RE)) {
+    view.append(value.slice(last, m.index), el("a", { href: m[0], target: "_blank", rel: "noopener" }, m[0]));
+    last = m.index + m[0].length;
+  }
+  view.append(value.slice(last));
+  const edit = (at) => {
+    const ta = editBox(value, onSave, cls);
+    // 다 고치고 나가면 다시 링크가 눌리는 글로 돌려 놓는다 (저장하며 목록을 다시 그렸으면 그대로 둔다)
+    ta.addEventListener("blur", () => { const v = ta.value.trim(); if (ta.isConnected && v) ta.replaceWith(textBox(v, onSave, cls)); });
+    view.replaceWith(ta);
+    ta.focus();
+    ta.setSelectionRange(at, at);
+  };
+  view.addEventListener("click", (e) => {
+    if (e.target.closest("a")) return;
+    // 누른 자리에 커서를 둔다
+    let at = value.length;
+    const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+    const c = !r && document.caretPositionFromPoint ? document.caretPositionFromPoint(e.clientX, e.clientY) : null;
+    const node = r ? r.startContainer : c && c.offsetNode, off = r ? r.startOffset : c && c.offset;
+    if (node && view.contains(node)) {
+      const pre = document.createRange();
+      pre.setStart(view, 0); pre.setEnd(node, off);
+      at = pre.toString().length;
+    }
+    edit(at);
+  });
+  view.addEventListener("keydown", (e) => { if (e.target === view && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); edit(value.length); } });
+  return view;
+}
+function editBox(value, onSave, cls) {
   const ta = el("textarea", { class: "text" + (cls ? " " + cls : ""), rows: "1", "aria-label": "내용" });
   ta.value = value || "";
   let timer = null;
@@ -921,10 +959,8 @@ function rowView(t, showCat) {
   // 같은 할 일이 "급한 일"과 제 분류에 두 번 그려지므로, 누른 그 줄에서만 날짜 칸을 연다
   const inst = showCat ? ":urgent" : "";
   const dateCtl = dateControl(t.id + inst, t.due, t.done, (due) => patch(t, { due }));
-  const url = urlOf(t.text);
-  const meta = (showCat || url) ? el("div", { class: "meta" },
-    showCat ? el("span", { class: "cat", style: cstyle(catOf(t)) }, catOf(t)) : null,
-    url ? el("a", { href: url, target: "_blank", rel: "noopener" }, "링크 열기") : null) : null;
+  const meta = showCat ? el("div", { class: "meta" },
+    el("span", { class: "cat", style: cstyle(catOf(t)) }, catOf(t))) : null;
 
   const row = el("div", { class: "row" + (t.done ? " done" : "") + (late ? " late" : "") },
     el("button", { class: "check", type: "button", "aria-label": t.done ? "완료 취소" : "완료", onclick: () => toggle(t) }),
