@@ -225,7 +225,10 @@ textarea.text:focus { outline: none; background: var(--bg); }
 .subitem { display: flex; flex-direction: column; gap: 2px; }
 .sub .bullet { flex: none; width: 12px; height: 23px; display: grid; place-items: center; cursor: grab; touch-action: none; }
 .sub .bullet::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); opacity: .6; }
-.sub .bullet:hover::before { opacity: 1; transform: scale(1.4); }
+/* 점이 끄는 손잡이 — 마우스를 줄에 올리면 할 일처럼 ⠿로 바뀐다 */
+@media (hover: hover) {
+  .sub:hover > .bullet::before { content: "⠿"; width: auto; height: auto; border-radius: 0; background: none; color: var(--muted); font-size: 11px; opacity: 1; }
+}
 .sub .text { font-size: 14px; padding: 1px 4px; }
 .subadd { font: inherit; font-size: 13.5px; color: var(--fg); background: var(--bg); border: 1px dashed var(--line); border-radius: 6px; padding: 4px 8px; width: 100%; min-width: 0; }
 .side { display: flex; align-items: center; gap: 2px; }
