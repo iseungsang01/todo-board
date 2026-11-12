@@ -141,6 +141,12 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus
 .minis summary { gap: 6px; padding: 9px 6px 9px 10px; }
 .minis .gname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .minis :is(.gren, .gdel) { padding: 2px 4px; flex: none; }
+/* 좁은 칸이라 ▾·✎·×는 칸을 누르거나 올렸을 때만 자리를 차지하게 */
+.minis .caret, .minis summary:not(:hover):not(:focus-within) :is(.gren, .gdel:not(.armed)) { display: none; }
+@media (max-width: 520px) {
+  .ddate { display: none; } /* 휴대폰에서는 D-8만, 날짜는 눌러서 */
+  .minis summary { padding: 9px 4px 9px 8px; gap: 5px; }
+}
 .minis .taskadd { width: calc(100% - 12px); margin: 2px 6px 6px; }
 details.group { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 details.group.focus { border-color: var(--late); }
@@ -839,7 +845,7 @@ function dateControl(key, due, done, onSave, cls) {
   return el("button", { type: "button", class: "dday " + (done ? "none" : ddayClass(n)) + (cls ? " " + cls : ""),
     title: due ? fmtDate(due) + " · 눌러서 바꾸기" : "마감일 넣기",
     onclick: () => { dateOpen = key; render(); } },
-    done ? (due ? fmtDate(due) : "") : n === null ? "+날짜" : ddayLabel(n) + " " + fmtDate(due));
+    ...(done ? [due ? fmtDate(due) : ""] : n === null ? ["+날짜"] : [ddayLabel(n), el("span", { class: "ddate" }, " " + fmtDate(due))]));
 }
 
 function rowView(t, showCat) {
