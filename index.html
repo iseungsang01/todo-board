@@ -277,8 +277,8 @@ textarea.text { line-height: 1.35; padding: 1px 4px; }
 .gadd { color: var(--muted); }
 /* 넓은 화면에서는 폭을 넓히고 분류를 여러 단으로 흘려 한 화면에 더 많이 */
 @media (min-width: 720px) {
-  .wrap { max-width: 1440px; padding-left: 20px; padding-right: 20px; }
-  .groups { display: block; column-width: 400px; column-gap: 10px; }
+  .wrap { max-width: 1280px; padding-left: 20px; padding-right: 20px; }
+  .groups { display: block; column-count: 2; column-gap: 10px; }
   .groups > * { break-inside: avoid; margin-bottom: 8px; }
   .groups > :is(.minis, details.group.focus) { column-span: all; }
   .minis { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
