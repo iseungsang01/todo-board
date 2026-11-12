@@ -906,16 +906,10 @@ function subsView(t, list, depth, inst, parentId) {
 }
 
 function panelView(t) {
-  const line = el("div", { class: "line" }, "분류 옮기기");
-  for (const c of [...cats, NONE]) {
-    const cur = catOf(t) === c;
-    line.append(el("button", { class: "chip sm", type: "button", "aria-pressed": String(cur),
-      onclick: () => { if (!cur) { patch(t, { cat: c === NONE ? "" : c }); render(); } } }, c));
-  }
-  const line2 = el("div", { class: "line" },
+  const line = el("div", { class: "line" },
     t.due ? el("button", { class: "chip sm", type: "button", onclick: () => saveDue(t, "") }, "마감일 지우기") : null,
     el("button", { class: "chip sm", type: "button", onclick: () => { panelOpen = null; render(); } }, "닫기"));
-  return el("div", { class: "panel" }, line, line2);
+  return el("div", { class: "panel" }, line);
 }
 
 // 마감일 단추 — 누르면 그 자리에서 날짜 칸으로 바뀐다. key는 화면에서 그 단추 하나를 가리킨다.
@@ -973,7 +967,7 @@ function rowView(t, showCat) {
       el("div", { class: "acts" },
         el("button", { class: "ic star" + (t.star ? " on" : ""), type: "button", "aria-label": t.star ? "중요 해제" : "중요 표시", "aria-pressed": String(!!t.star),
           onclick: () => { patch(t, { star: !t.star }); render(); } }, t.star ? "★" : "☆"),
-        el("button", { class: "ic", type: "button", "aria-label": "더 보기 (분류 옮기기, 하위 항목 지우기)", "aria-expanded": String(panelOpen === t.id),
+        el("button", { class: "ic", type: "button", "aria-label": "더 보기 (마감일·하위 항목 지우기)", "aria-expanded": String(panelOpen === t.id),
           onclick: () => { panelOpen = panelOpen === t.id ? null : t.id; render(); } }, "⋯"),
         el("button", { class: "ic x", type: "button", "aria-label": "지우기", onclick: () => removeMany([t]) }, "×")))
   );
