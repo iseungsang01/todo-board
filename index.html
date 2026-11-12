@@ -136,6 +136,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus
 
 /* 묶음 */
 .groups { display: flex; flex-direction: column; gap: 10px; }
+.cards { display: flex; flex-direction: column; gap: 6px; }
 .minis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .minis details.group { min-width: 0; }
 .minis summary { gap: 6px; padding: 9px 6px 9px 10px; }
@@ -278,9 +279,8 @@ textarea.text { line-height: 1.35; padding: 1px 4px; }
 /* 넓은 화면에서는 폭을 넓히고 분류를 여러 단으로 흘려 한 화면에 더 많이 */
 @media (min-width: 720px) {
   .wrap { max-width: 1280px; padding-left: 20px; padding-right: 20px; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: stretch; }
-  .col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .col > details.group:last-child { flex-grow: 1; } /* 짧은 단은 마지막 상자가 늘어나 바닥이 맞는다 */
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; } /* 같은 줄 두 상자는 높이가 같다 */
+  .cards > details.group { min-width: 0; }
   .minis { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 }
 @media (max-width: 520px) {
@@ -974,7 +974,6 @@ function groupView(name, label, items, opts) {
   return d;
 }
 
-const wide = matchMedia("(min-width: 720px)"); // CSS의 넓은 화면 기준과 같게
 function render() {
   if (dragging) return;
   const active = document.activeElement;
@@ -989,36 +988,23 @@ function render() {
   for (const t of shown) { const c = catOf(t); (c === NONE ? none : byCat.get(c)).push(t); }
   // 할 일이 남지 않은 분류는 위쪽 3칸 격자에 작게 몰아 둔다
   const minis = query ? null : el("div", { class: "minis" });
-  const cards = []; // [분류 상자, 대강의 줄 수]
-  const weight = (items) => 1.5 + items.filter(t => !t.done || !hideDone).reduce((n, t) => n + 1 + flatSub(t.sub).length, 0);
+  const cards = [];
   for (const [c, items] of byCat) {
     if (query && !items.length) continue;
     if (minis && !items.some(t => !t.done)) { minis.append(groupView(c, c, items, { movable: true, mini: true })); continue; }
-    cards.push([groupView(c, c, items, { movable: !query }), weight(items)]);
+    cards.push(groupView(c, c, items, { movable: !query }));
   }
-  if (none.length) cards.push([groupView(NONE, NONE, none, {}), weight(none)]);
+  if (none.length) cards.push(groupView(NONE, NONE, none, {}));
   if (minis && minis.children.length) box.append(minis);
-  if (wide.matches && cards.length > 1) {
-    // 넓은 화면: 순서를 지킨 채 왼쪽·오른쪽 두 단으로 나누되 줄 수가 가장 비슷해지는 자리에서 자르고,
-    // 짧은 단의 마지막 상자를 늘려 두 단 바닥을 맞춘다
-    const total = cards.reduce((n, c) => n + c[1], 0);
-    let cut = 1, best = Infinity, acc = 0;
-    for (let i = 1; i < cards.length; i++) {
-      acc += cards[i - 1][1];
-      const diff = Math.abs(total - 2 * acc);
-      if (diff < best) { best = diff; cut = i; }
-    }
-    box.append(el("div", { class: "cols" },
-      el("div", { class: "col" }, ...cards.slice(0, cut).map(c => c[0])),
-      el("div", { class: "col" }, ...cards.slice(cut).map(c => c[0]))));
-  } else box.append(...cards.map(c => c[0]));
+  // 넓은 화면에서는 CSS가 .cards를 2칸 격자로 놓아, 나란히 선 두 상자의 높이가 같아진다
+  if (cards.length) box.append(el("div", { class: "cards" }, ...cards));
   if (!box.children.length) {
     box.append(el("div", { class: "empty" }, query ? "'" + query + "'에 맞는 할 일이 없습니다."
       : "아직 아무것도 없습니다. 아래 '+ 분류 추가'로 분류를 만들고 그 안에 할 일을 적으세요."));
   }
   if (!query) box.append(catAddView());
-  if (window.Sortable) for (const n of box.querySelectorAll(".col")) {
-    Sortable.create(n, { group: "cats", animation: 150, ghostClass: "sort-ghost", chosenClass: "sort-chosen", draggable: "details.group[data-cat]", handle: ".handle",
+  if (window.Sortable) for (const n of box.querySelectorAll(".cards")) {
+    Sortable.create(n, { animation: 150, ghostClass: "sort-ghost", chosenClass: "sort-chosen", draggable: "details.group[data-cat]", handle: ".handle",
       onStart: () => { dragging = true; }, onEnd: () => reorderFrom($("groups")) });
   }
   if (window.Sortable) for (const n of box.querySelectorAll(".subs[data-tid]")) {
@@ -1028,7 +1014,6 @@ function render() {
 }
 
 /* ---------- 이벤트 ---------- */
-wide.addEventListener("change", () => render());
 $("search").addEventListener("input", (e) => { query = e.target.value.trim(); render(); });
 const hd = $("hideDone");
 hd.setAttribute("aria-pressed", String(hideDone));
@@ -1044,11 +1029,6 @@ function reorderFrom(container) {
   dragging = false;
   if (next.join("\u0000") === cats.join("\u0000")) { render(); return; }
   saveCats(next);
-}
-if (window.Sortable) {
-  const common = { animation: 150, ghostClass: "sort-ghost", chosenClass: "sort-chosen",
-    onStart: () => { dragging = true; }, onEnd: (e) => reorderFrom(e.from) };
-  Sortable.create($("groups"), { ...common, draggable: "details.group[data-cat]", handle: ".handle" });
 }
 
 // 자정이 지나면 D-day를 다시 계산
