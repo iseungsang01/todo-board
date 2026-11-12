@@ -192,12 +192,14 @@ button.dot { cursor: pointer; }
 .swipe .under.left { background: var(--late-soft); color: var(--late); }
 .row { position: relative; background: var(--surface); display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; padding: 8px 6px 8px 12px; touch-action: pan-y; }
 .row.late { background: var(--late-soft); }
-/* 왼쪽 끝 ⠿를 끌면 할 일 순서·분류가 바뀐다 */
-.row .grip { position: absolute; left: 0; top: 0; bottom: 0; width: 11px; display: grid; place-items: center; color: var(--muted); font-size: 11px; cursor: grab; touch-action: none; opacity: .35; }
-@media (hover: hover) { .row .grip { opacity: 0; } .row:hover .grip { opacity: 1; } }
+/* 체크 상자 앞 ⠿를 끌면 할 일 순서·분류가 바뀐다. 끌 수 없는 줄(완료·급한 일)은 자리만 둔다 */
+.lead { display: flex; align-items: flex-start; }
+.grip { width: 12px; height: 23px; display: grid; place-items: center; color: var(--muted); font-size: 12px; cursor: grab; touch-action: none; opacity: .45; flex: none; }
+.grip.off { visibility: hidden; }
+.row:hover .grip { opacity: 1; }
 .check { width: 22px; height: 22px; margin-top: 3px; border-radius: 6px; padding: 0; border: 2px solid var(--muted); background: transparent; display: grid; place-items: center; flex: none; }
-.done > .check { background: var(--ok); border-color: var(--ok); }
-.done > .check::after { content: ""; width: 6px; height: 11px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+.done .check { background: var(--ok); border-color: var(--ok); }
+.done .check::after { content: ""; width: 6px; height: 11px; border: solid var(--surface); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
 .body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 textarea.text, .text.view {
   font: inherit; color: var(--fg); background: transparent; border: 0; resize: none; overflow: hidden;
@@ -253,8 +255,6 @@ input[type="date"].sm { font: inherit; font-size: 12px; color: var(--fg); backgr
 .ic.x:hover { color: var(--late); background: var(--late-soft); }
 .ic.star.on { color: var(--star); }
 .ic.small { width: 24px; height: 24px; font-size: 15px; }
-.panel { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; padding: 6px 4px 4px 30px; }
-.panel .line { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--muted); }
 .donebar { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px 6px 12px; background: var(--bg); border-top: 1px solid var(--line); font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; }
 .empty { color: var(--muted); text-align: center; padding: 28px 12px; border: 1px dashed var(--line); border-radius: 10px; }
 
@@ -278,8 +278,9 @@ input[type="date"].sm { font: inherit; font-size: 12px; color: var(--fg); backgr
 .minis { gap: 6px; }
 details.group > summary { padding: 6px 8px 6px 10px; gap: 8px; }
 .minis summary { padding: 6px 6px 6px 9px; }
-.row { padding: 2px 4px 2px 10px; gap: 6px; }
-.check { width: 19px; height: 19px; margin-top: 3px; }
+.row { padding: 2px 4px 2px 2px; gap: 5px; }
+.check { width: 16px; height: 16px; margin-top: 4px; border-width: 1.5px; border-radius: 4px; }
+.done .check::after { width: 4px; height: 8px; }
 textarea.text, .text.view { line-height: 1.35; padding: 1px 4px; }
 .ic { width: 24px; height: 24px; font-size: 15px; }
 .ic.small { width: 20px; height: 20px; font-size: 14px; }
@@ -355,7 +356,6 @@ let subAdding = null;
 const drafts = {}; // 분류별로 쓰다 만 할 일
 let dateOpen = null;
 let taskAdding = null; // 할 일이 있는 분류는 머리줄 + 를 눌렀을 때만 입력칸을 연다
-let panelOpen = null;
 let query = "";
 let undoStack = null, toastTimer = null;
 let dragging = false;
@@ -877,7 +877,6 @@ function subAddBox(t, parentId) {
 // 하위 항목 한 단계 묶음. 점(•)을 끌면 같은 단계 안에서 순서가 바뀐다 (render 끝의 sortSubs).
 function subsView(t, list, depth, inst, parentId) {
   list = list || [];
-  const editing = panelOpen === t.id;
   const box = el("div", { class: "subs" + (depth > 1 ? " nested" : ""), "data-tid": t.id, "data-parent": parentId || "" });
   for (const s of list) {
     const kids = s.sub && s.sub.length ? subsView(t, s.sub, depth + 1, inst, s.id) : null;
@@ -892,11 +891,9 @@ function subsView(t, list, depth, inst, parentId) {
         if (text === s.text) return;
         saveSubs(t, mapSub(t.sub, s.id, (x) => text ? { ...x, text } : null));
       }),
-      // 날짜가 있으면 늘 보이고, 없으면 ⋯를 연 동안만 "+날짜"를 보인다 (글에 내일·11/20을 쓰고 나가면 들어간다)
-      s.due || editing ? dateControl("sub:" + s.id + inst, s.due, t.done, (due) => saveSubs(t, mapSub(t.sub, s.id, (x) => ({ ...x, due }))), "sm") : null,
-      depth < SUB_DEPTH ? subAddBtn(t, s.id) : el("span"),
-      editing ? el("button", { class: "ic small x", type: "button", "aria-label": "하위 항목 지우기",
-        onclick: () => { saveSubs(t, mapSub(t.sub, s.id, () => null)); render(); } }, "×") : null));
+      // 날짜는 있을 때만 보인다 (글에 내일·11/20을 쓰고 나가면 들어가고, 날짜 칸을 비우고 Enter면 빠진다). 글을 다 지우면 항목이 지워진다.
+      s.due ? dateControl("sub:" + s.id + inst, s.due, t.done, (due) => saveSubs(t, mapSub(t.sub, s.id, (x) => ({ ...x, due }))), "sm") : null,
+      depth < SUB_DEPTH ? subAddBtn(t, s.id) : el("span")));
     const adding = subAdding === subKey(t, s.id);
     if (kids || adding) {
       const k = kids || el("div", { class: "subs nested" });
@@ -906,13 +903,6 @@ function subsView(t, list, depth, inst, parentId) {
   }
   if (depth === 1 && subAdding === subKey(t)) box.append(subAddBox(t, null));
   return box.children.length ? box : null;
-}
-
-function panelView(t) {
-  const line = el("div", { class: "line" },
-    t.due ? el("button", { class: "chip sm", type: "button", onclick: () => saveDue(t, "") }, "마감일 지우기") : null,
-    el("button", { class: "chip sm", type: "button", onclick: () => { panelOpen = null; render(); } }, "닫기"));
-  return el("div", { class: "panel" }, line);
 }
 
 // 마감일 단추 — 누르면 그 자리에서 날짜 칸으로 바뀐다. key는 화면에서 그 단추 하나를 가리킨다.
@@ -963,18 +953,16 @@ function rowView(t, showCat) {
     el("span", { class: "cat", style: cstyle(catOf(t)) }, catOf(t))) : null;
 
   const row = el("div", { class: "row" + (t.done ? " done" : "") + (late ? " late" : "") },
-    !t.done && !showCat ? el("span", { class: "grip", title: "끌어서 순서·분류 바꾸기", "aria-hidden": "true" }, "⠿") : null,
-    el("button", { class: "check", type: "button", "aria-label": t.done ? "완료 취소" : "완료", onclick: () => toggle(t) }),
+    el("span", { class: "lead" },
+      el("span", { class: "grip" + (!t.done && !showCat ? "" : " off"), title: "끌어서 순서·분류 바꾸기", "aria-hidden": "true" }, "⠿"),
+      el("button", { class: "check", type: "button", "aria-label": t.done ? "완료 취소" : "완료", onclick: () => toggle(t) })),
     el("div", { class: "body" }, el("div", { class: "title" }, textBox(t.text, (v, final) => saveText(t, v, final)), subAddBtn(t)), meta, subsView(t, t.sub, 1, inst)),
     el("div", { class: "side" }, dateCtl,
       el("div", { class: "acts" },
         el("button", { class: "ic star" + (t.star ? " on" : ""), type: "button", "aria-label": t.star ? "중요 해제" : "중요 표시", "aria-pressed": String(!!t.star),
           onclick: () => { patch(t, { star: !t.star }); render(); } }, t.star ? "★" : "☆"),
-        el("button", { class: "ic", type: "button", "aria-label": "더 보기 (마감일·하위 항목 지우기)", "aria-expanded": String(panelOpen === t.id),
-          onclick: () => { panelOpen = panelOpen === t.id ? null : t.id; render(); } }, "⋯"),
         el("button", { class: "ic x", type: "button", "aria-label": "지우기", onclick: () => removeMany([t]) }, "×")))
   );
-  if (panelOpen === t.id) row.append(panelView(t));
   const wrapEl = el("div", { class: "swipe", "data-id": !t.done && !showCat ? t.id : null },
     el("div", { class: "under right", hidden: "" }, t.done ? "완료 취소" : "완료"),
     el("div", { class: "under left", hidden: "" }, el("span"), "지우기"),
