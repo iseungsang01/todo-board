@@ -205,7 +205,10 @@ textarea.text:focus { outline: none; background: var(--bg); }
 .addsub { opacity: .45; }
 .addsub:hover, .addsub:focus-visible { opacity: 1; }
 .subs.nested { margin-left: 8px; padding-left: 10px; border-left: 2px solid var(--line); }
-.sub .bullet { flex: none; width: 5px; height: 5px; margin: 11px 3px 0 2px; border-radius: 50%; background: var(--muted); opacity: .6; }
+.subitem { display: flex; flex-direction: column; gap: 2px; }
+.sub .bullet { flex: none; width: 12px; height: 23px; display: grid; place-items: center; cursor: grab; touch-action: none; }
+.sub .bullet::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); opacity: .6; }
+.sub .bullet:hover::before { opacity: 1; transform: scale(1.4); }
 .sub textarea.text { font-size: 14px; padding: 1px 4px; }
 .subadd { font: inherit; font-size: 13.5px; color: var(--fg); background: var(--bg); border: 1px dashed var(--line); border-radius: 6px; padding: 4px 8px; width: 100%; min-width: 0; }
 .side { display: flex; align-items: center; gap: 2px; }
@@ -683,7 +686,7 @@ function attachSwipe(wrapEl, rowEl, t) {
   let x0 = 0, y0 = 0, dx = 0, active = false, decided = false, pid = null;
   const right = wrapEl.querySelector(".under.right"), left = wrapEl.querySelector(".under.left");
   rowEl.addEventListener("pointerdown", (e) => {
-    if (e.pointerType !== "touch" || e.target.closest("button, a, input")) return;
+    if (e.pointerType !== "touch" || e.target.closest("button, a, input, .bullet")) return;
     x0 = e.clientX; y0 = e.clientY; dx = 0; active = true; decided = false; pid = e.pointerId;
   });
   rowEl.addEventListener("pointermove", (e) => {
@@ -737,6 +740,14 @@ function mapSub(list, id, fn) {
   }
   return out;
 }
+function sortSubs(container) {
+  const t = tasks.find(x => x.id === container.dataset.tid);
+  if (!t) return;
+  const order = [...container.querySelectorAll(":scope > .subitem")].map(n => n.dataset.sid);
+  const sorted = (list) => [...(list || [])].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  const parent = container.dataset.parent;
+  saveSubs(t, parent ? mapSub(t.sub, parent, (x) => ({ ...x, sub: sorted(x.sub) })) : sorted(t.sub));
+}
 function flatSub(list) { return (list || []).flatMap(x => [x, ...flatSub(x.sub)]); }
 // subAdding은 입력칸이 열린 자리: "할일id:" 또는 "할일id:하위id"
 function subKey(t, parentId) { return t.id + ":" + (parentId || ""); }
@@ -768,14 +779,17 @@ function subAddBox(t, parentId) {
   }, 0));
   return inp;
 }
-function subsView(t, list, depth, inst) {
+// 하위 항목 한 단계 묶음. 점(•)을 끌면 같은 단계 안에서 순서가 바뀐다 (render 끝의 sortSubs).
+function subsView(t, list, depth, inst, parentId) {
   list = list || [];
   const editing = panelOpen === t.id;
-  const box = el("div", { class: "subs" + (depth > 1 ? " nested" : "") });
+  const box = el("div", { class: "subs" + (depth > 1 ? " nested" : ""), "data-tid": t.id, "data-parent": parentId || "" });
   for (const s of list) {
-    const kids = s.sub && s.sub.length ? subsView(t, s.sub, depth + 1, inst) : null;
-    box.append(el("div", { class: "sub" },
-      el("span", { class: "bullet", "aria-hidden": "true" }),
+    const kids = s.sub && s.sub.length ? subsView(t, s.sub, depth + 1, inst, s.id) : null;
+    const item = el("div", { class: "subitem", "data-sid": s.id });
+    box.append(item);
+    item.append(el("div", { class: "sub" },
+      el("span", { class: "bullet", title: "끌어서 순서 바꾸기", "aria-hidden": "true" }),
       textBox(s.text, (v, final) => {
         const p = final ? parseLine(v) : null;
         if (p && p.due && p.text) { saveSubs(t, mapSub(t.sub, s.id, (x) => ({ ...x, text: p.text, due: p.due }))); render(); return; }
@@ -792,7 +806,7 @@ function subsView(t, list, depth, inst) {
     if (kids || adding) {
       const k = kids || el("div", { class: "subs nested" });
       if (adding) k.append(subAddBox(t, s.id));
-      box.append(k);
+      item.append(k);
     }
   }
   if (depth === 1 && subAdding === subKey(t)) box.append(subAddBox(t, null));
@@ -935,6 +949,10 @@ function render() {
       : "아직 아무것도 없습니다. 아래 '+ 분류 추가'로 분류를 만들고 그 안에 할 일을 적으세요."));
   }
   if (!query) box.append(catAddView());
+  if (window.Sortable) for (const n of box.querySelectorAll(".subs[data-tid]")) {
+    Sortable.create(n, { animation: 150, ghostClass: "sort-ghost", draggable: ".subitem", handle: ".bullet",
+      onStart: () => { dragging = true; }, onEnd: () => { dragging = false; sortSubs(n); render(); } });
+  }
 }
 
 /* ---------- 이벤트 ---------- */
