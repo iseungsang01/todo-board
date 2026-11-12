@@ -233,6 +233,10 @@ textarea.text:focus { outline: none; background: var(--bg); }
 .dday.soon { background: var(--soon-soft); color: var(--soon); }
 .dday.none { background: transparent; color: var(--muted); font-weight: 500; }
 .dday.sm { font-size: 11px; padding: 1px 6px; margin-top: 3px; flex: none; }
+.dateedit { display: inline-flex; align-items: center; gap: 2px; position: relative; flex: none; }
+.datetxt { font: inherit; font-family: var(--font-mono); font-size: 12px; width: 5.5em; color: var(--fg); background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; padding: 1px 6px; outline: none; }
+.datetxt.bad { border-color: var(--late); background: var(--late-soft); }
+.datecal { position: absolute; right: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
 input[type="date"].sm { font: inherit; font-size: 12px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 4px; flex: none; }
 .side input[type="date"] { font: inherit; font-size: 12px; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; }
 .ic { width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 17px; line-height: 1; border-radius: 6px; }
@@ -877,11 +881,33 @@ function panelView(t) {
 function dateControl(key, due, done, onSave, cls) {
   const n = daysLeft(due);
   if (dateOpen === key) {
-    const inp = el("input", { type: "date", class: cls || "", value: due || "", "aria-label": "마감일" });
-    inp.addEventListener("change", () => { dateOpen = null; onSave(inp.value); render(); });
-    inp.addEventListener("blur", () => { if (dateOpen === key) { dateOpen = null; render(); } });
-    requestAnimationFrame(() => inp.focus());
-    return inp;
+    // 연도는 거의 안 쓰니 월/일부터 적는다(11/30, 1130, 내일, D-3 …). 연도는 올해, 두 달 넘게 지난 날짜면 내년.
+    // 달력으로 고르고 싶으면 📅 → 브라우저 달력.
+    // 입력칸에 포커스가 있으면 render가 건너뛰므로 먼저 놓고 다시 그린다
+    const release = () => { const a = document.activeElement; if (a && a.blur && box.contains(a)) a.blur(); };
+    const close = () => { if (dateOpen === key) { dateOpen = null; release(); render(); } };
+    const save = (v) => { dateOpen = null; onSave(v); release(); render(); };
+    const txt = el("input", { class: "datetxt", inputmode: "numeric", placeholder: "월/일", "aria-label": "마감일 (월/일)",
+      value: due ? (+due.slice(5, 7)) + "/" + (+due.slice(8, 10)) : "" });
+    const cal = el("input", { type: "date", class: "datecal", tabindex: "-1", "aria-hidden": "true", value: due || "" });
+    cal.addEventListener("change", () => { if (cal.value) save(cal.value); });
+    txt.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      if (e.key !== "Enter" || e.isComposing) return;
+      e.preventDefault();
+      const v = txt.value.trim();
+      if (!v) { save(""); return; }
+      const p = parseLine(/^\d{3,4}$/.test(v) ? v.slice(0, -2) + "/" + v.slice(-2) : v); // 1130 → 11/30
+      if (p.due && !p.text) save(p.due);
+      else { txt.classList.add("bad"); txt.select(); }
+    });
+    txt.addEventListener("input", () => txt.classList.remove("bad"));
+    const box = el("span", { class: "dateedit" + (cls ? " " + cls : "") }, txt,
+      el("button", { type: "button", class: "ic small", title: "달력에서 고르기", "aria-label": "달력에서 고르기",
+        onclick: () => { try { cal.showPicker(); } catch { cal.focus(); } } }, "📅"), cal);
+    box.addEventListener("focusout", (e) => { if (!box.contains(e.relatedTarget)) setTimeout(() => { if (!box.contains(document.activeElement)) close(); }, 0); });
+    requestAnimationFrame(() => { txt.focus(); txt.select(); });
+    return box;
   }
   return el("button", { type: "button", class: "dday " + (done ? "none" : ddayClass(n)) + (cls ? " " + cls : ""),
     title: due ? fmtDate(due) + " · 눌러서 바꾸기" : "마감일 넣기",
