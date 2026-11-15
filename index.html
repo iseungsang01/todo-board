@@ -86,7 +86,7 @@ img { max-width: 100%; }
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   display: flex; flex-direction: column; gap: 12px;
 }
-header.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 2px; }
+header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px; }
 .top h1 { font-size: 22px; margin: 0; }
 .top #logoutBtn { margin-left: auto; font-size: 13px; }
 .board { display: flex; flex-direction: column; gap: 12px; }
@@ -126,6 +126,30 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus
 .taskadd:focus { background: var(--bg); }
 .newcat input { font: inherit; font-size: 13.5px; color: var(--fg); background: var(--bg); border: 1px solid var(--accent); border-radius: 999px; padding: 4px 12px; width: 9em; }
 .newcat button { padding: 4px 10px; font-size: 13px; border-radius: 999px; }
+
+/* 탭: 할 일 / 기프티콘 */
+.tabs { display: flex; gap: 4px; }
+.tabs button { padding: 3px 10px; font-size: 13.5px; border-radius: 999px; background: transparent; border-color: transparent; color: var(--muted); }
+.tabs button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.badge { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px; background: var(--late); color: var(--surface); font-size: 11.5px; font-weight: 700; line-height: 18px; text-align: center; }
+
+/* 기프티콘 */
+.gifts { display: flex; flex-direction: column; gap: 6px; }
+.gift { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px 6px 6px; }
+.gift.late { border-color: var(--late); }
+.gift.used { opacity: .55; }
+.gift.used .text { text-decoration: line-through; }
+.gift .thumb { width: 44px; height: 60px; object-fit: cover; object-position: top; border-radius: 6px; background: var(--bg); }
+.gift .noimg { display: grid; place-items: center; font-size: 20px; }
+.gift .gmain { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gift .gbrand { font: inherit; font-size: 12.5px; color: var(--muted); background: transparent; border: 0; padding: 0 4px; outline: none; }
+.gift .gbrand:focus { background: var(--bg); border-radius: 4px; }
+.gift .gside { display: flex; align-items: center; gap: 4px; }
+.gift .use { font-size: 12.5px; padding: 3px 9px; }
+.gift.reading { color: var(--muted); font-size: 14px; }
+.giftdone { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.giftdone > summary { cursor: pointer; padding: 6px 10px; font-size: 13px; font-weight: 700; color: var(--muted); }
+.giftdone .gifts { padding: 0 6px 6px; }
 
 /* 검색·보기 */
 .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -308,8 +332,22 @@ textarea.text, .text.view { line-height: 1.35; padding: 1px 4px; }
 <div class="wrap">
   <header class="top">
     <h1>할일판</h1>
+    <nav class="tabs" id="tabs" hidden>
+      <button type="button" data-tab="todo" aria-pressed="true">할 일</button>
+      <button type="button" data-tab="gift" aria-pressed="false">기프티콘<span class="badge" id="giftBadge" hidden></span></button>
+    </nav>
     <button class="ghost" id="logoutBtn" type="button" hidden>로그아웃</button>
   </header>
+
+  <div class="board" id="giftBoard" hidden>
+    <div class="tools">
+      <button class="primary" id="giftAddBtn" type="button">＋ 스크린샷으로 추가</button>
+      <button id="giftManualBtn" type="button">직접 적기</button>
+      <input type="file" id="giftFile" accept="image/*" multiple hidden>
+    </div>
+    <div class="status" id="giftStatus" hidden></div>
+    <div class="gifts" id="gifts"></div>
+  </div>
 
   <form class="login" id="login" hidden>
     <input id="loginId" autocomplete="username" autocapitalize="off" spellcheck="false" placeholder="아이디 (일정표 계정)" aria-label="아이디">
@@ -704,7 +742,7 @@ async function removeMany(list) {
   tasks = tasks.filter(t => !ids.has(t.id));
   render();
   for (const t of list) await write(() => col.doc(t.id).delete());
-  undoStack = snapshot;
+  undoStack = { col, items: snapshot };
   showToast(list.length === 1 ? "지웠습니다" : list.length + "개를 지웠습니다");
 }
 function showToast(msg) {
@@ -714,11 +752,11 @@ function showToast(msg) {
   toastTimer = setTimeout(() => { $("toast").hidden = true; undoStack = null; }, 6000);
 }
 $("undoBtn").addEventListener("click", async () => {
-  const items = undoStack;
+  const u = undoStack;
   undoStack = null;
   $("toast").hidden = true;
-  if (!items) return;
-  for (const it of items) await write(() => col.doc(it.id).set(it.data));
+  if (!u) return;
+  for (const it of u.items) await write(() => u.col.doc(it.id).set(it.data));
 });
 
 /* ---------- 내보내기 · 가져오기 ---------- */
@@ -1041,6 +1079,7 @@ function groupView(name, label, items, opts) {
 }
 
 function render() {
+  if (gcol) renderGifts(); // 마감일 단추(dateControl)가 render()만 부르므로 기프티콘도 함께 그린다
   if (dragging) return;
   const active = document.activeElement;
   if (active && active.closest("#groups") && active.matches("textarea, input")) return; // 쓰는 중에는 목록을 다시 그리지 않음
@@ -1105,13 +1144,164 @@ function reorderFrom(container) {
 let day = ymd(new Date());
 setInterval(() => { const d = ymd(new Date()); if (d !== day) { day = d; render(); } }, 60000);
 
+/* ---------- 기프티콘 ----------
+   스크린샷을 넣으면 브라우저 안에서 OCR(tesseract.js, 한국어+영어)로 글자를 읽어 상품명·교환처·유효기간을 고른다.
+   사진은 서버로 보내지 않는다. 읽은 값은 틀릴 수 있어 바로 고칠 수 있게 보여 준다.
+   "gifts" 묶음에 {name, brand, due, thumb(작은 JPEG), used, createdAt}로 저장한다. */
+const GIFT_SOON = 7;
+const TESS_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+let gifts = [], gcol = null;
+let giftReading = 0, giftFocus = null, giftDoneOpen = false;
+let tab = store.get("tab", "todo");
+
+const GIFT_DATE_KEY = /유효|기한|까지|만료|사용\s*기간|~/;
+const GIFT_SKIP = /유효|기한|까지|만료|교환처|사용처|주문|번호|선물|바코드|사용\s*기간|%|\d{1,2}:\d{2}/;
+// OCR 줄({text, conf, h, y})에서 유효기간(날짜 말이 붙은 줄 우선, 없으면 가장 늦은 날짜),
+// 상품명(글자가 가장 큰 줄), 교환처([GS25] 머리말 · "교환처" 줄 · 상품명 바로 윗줄)를 고른다.
+function parseGift(lines) {
+  const dates = [];
+  for (const l of lines) {
+    const re = /(20\d{2})[.\-\/년](\d{1,2})[.\-\/월](\d{1,2})/g;
+    const s = l.text.replace(/[\s_]+/g, "");
+    let m;
+    while ((m = re.exec(s))) {
+      const mo = +m[2], da = +m[3];
+      if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) dates.push({ v: m[1] + "-" + pad(mo) + "-" + pad(da), key: GIFT_DATE_KEY.test(l.text) });
+    }
+  }
+  dates.sort((a, b) => (b.key - a.key) || (a.v < b.v ? 1 : -1));
+  const isName = (t) => (t.match(/[가-힣A-Za-z]/g) || []).length >= 2 && !GIFT_SKIP.test(t) && (t.match(/\d/g) || []).length < t.length / 2;
+  const cand = lines.filter(l => l.conf >= 50 && isName(l.text)).sort((a, b) => b.h - a.h);
+  const top = cand[0];
+  let name = top ? top.text : "", brand = "";
+  const bracket = name.match(/^\[([^\]]+)\]\s*/);
+  if (bracket) { brand = bracket[1]; name = name.slice(bracket[0].length); }
+  const where = lines.find(l => /교환처|사용처/.test(l.text));
+  if (!brand && where) brand = where.text.replace(/.*(교환처|사용처)\s*[:：]?\s*/, "").replace(/\s*전국.*$/, "");
+  if (!brand && top) {
+    const above = lines.filter(l => l.y < top.y && isName(l.text) && l.text.length <= 15).sort((a, b) => b.y - a.y)[0];
+    if (above && top.y - above.y < top.h * 3) brand = above.text;
+  }
+  return { name: name.trim(), brand: brand.trim(), due: dates[0] ? dates[0].v : "" };
+}
+let ocrWorker = null;
+function ocrReady() {
+  if (!ocrWorker) ocrWorker = (async () => {
+    if (!window.Tesseract) await new Promise((ok, no) => document.head.append(el("script", { src: TESS_URL, onload: ok, onerror: no })));
+    return Tesseract.createWorker(["kor", "eng"]);
+  })().catch((e) => { ocrWorker = null; throw e; });
+  return ocrWorker;
+}
+async function readGift(file) {
+  const w = await ocrReady();
+  const { data } = await w.recognize(file, {}, { blocks: true });
+  const lines = (data.blocks || []).flatMap(b => b.paragraphs.flatMap(p => p.lines))
+    .map(l => ({ text: l.text.normalize("NFKC").trim(), conf: l.confidence, h: l.bbox.y1 - l.bbox.y0, y: l.bbox.y0 }))
+    .filter(l => l.text);
+  return parseGift(lines);
+}
+async function thumbOf(file) {
+  const bmp = await createImageBitmap(file);
+  const W = 120, H = Math.round(bmp.height * W / bmp.width);
+  const c = el("canvas", { width: W, height: H });
+  c.getContext("2d").drawImage(bmp, 0, 0, W, H);
+  bmp.close();
+  return c.toDataURL("image/jpeg", 0.7);
+}
+function setGiftStatus(msg, err) {
+  const s = $("giftStatus");
+  s.textContent = msg || ""; s.hidden = !msg; s.classList.toggle("err", !!err);
+}
+async function addGiftFiles(files) {
+  setGiftStatus("");
+  giftReading += files.length;
+  renderGifts();
+  let failed = 0;
+  for (const f of files) {
+    let info = { name: "", brand: "", due: "" }, thumb = "";
+    try { thumb = await thumbOf(f); } catch {}
+    try { info = await readGift(f); } catch { failed++; }
+    giftReading--;
+    await write(() => gcol.add({ ...info, thumb, used: false, createdAt: Date.now() }));
+  }
+  renderGifts();
+  if (failed) setGiftStatus("글자를 읽지 못한 사진이 " + failed + "장 있습니다. 상품명·날짜를 직접 적어 주세요.", true);
+}
+$("giftAddBtn").addEventListener("click", () => $("giftFile").click());
+$("giftFile").addEventListener("change", (e) => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) addGiftFiles(fs); });
+$("giftManualBtn").addEventListener("click", async () => {
+  const { id } = await gcol.add({ name: "", brand: "", due: "", thumb: "", used: false, createdAt: Date.now() });
+  giftFocus = id;
+  renderGifts();
+});
+function patchGift(g, data) { Object.assign(g, data); return write(() => gcol.doc(g.id).update(data)); }
+async function removeGift(g) {
+  const { id, ...data } = g;
+  gifts = gifts.filter(x => x.id !== id);
+  renderGifts();
+  await write(() => gcol.doc(id).delete());
+  undoStack = { col: gcol, items: [{ id, data }] };
+  showToast("기프티콘을 지웠습니다");
+}
+function giftRow(g) {
+  const n = daysLeft(g.due);
+  const date = dateControl("gift:" + g.id, g.due, g.used, (due) => patchGift(g, { due }));
+  if (!g.used && n !== null && n > SOON_DAYS && n <= GIFT_SOON) date.classList.add("soon");
+  const name = editBox(g.name, (v) => patchGift(g, { name: v.trim() }));
+  name.placeholder = "상품명";
+  name.dataset.gid = g.id;
+  const brand = el("input", { class: "gbrand", placeholder: "교환처", "aria-label": "교환처", value: g.brand || "" });
+  brand.addEventListener("change", () => patchGift(g, { brand: brand.value.trim() }));
+  brand.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) brand.blur(); });
+  return el("div", { class: "gift" + (g.used ? " used" : n !== null && n < 0 ? " late" : "") },
+    g.thumb ? el("img", { class: "thumb", src: g.thumb, alt: "" }) : el("div", { class: "thumb noimg" }, "🎁"),
+    el("div", { class: "gmain" }, name, brand),
+    el("div", { class: "gside" }, date,
+      el("button", { type: "button", class: "use", onclick: () => { patchGift(g, { used: !g.used }); renderGifts(); } }, g.used ? "되살리기" : "썼음"),
+      el("button", { type: "button", class: "ic x", title: "지우기", "aria-label": "지우기", onclick: () => removeGift(g) }, "×")));
+}
+function renderGifts() {
+  const soon = gifts.filter(g => { const n = daysLeft(g.due); return !g.used && n !== null && n >= 0 && n <= GIFT_SOON; }).length;
+  $("giftBadge").textContent = soon;
+  $("giftBadge").hidden = !soon;
+  const box = $("gifts");
+  const active = document.activeElement;
+  if (active && box.contains(active) && active.matches("textarea, input")) return; // 쓰는 중에는 다시 그리지 않음
+  const key = (g) => g.due || "9999";
+  const byDue = (a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : (a.createdAt || 0) - (b.createdAt || 0);
+  const live = gifts.filter(g => !g.used).sort(byDue), used = gifts.filter(g => g.used).sort(byDue);
+  box.replaceChildren(...live.map(giftRow));
+  for (let i = 0; i < giftReading; i++) box.append(el("div", { class: "gift reading" }, el("div", { class: "thumb noimg" }, "⏳"), "글자 읽는 중… (처음엔 글자 모델을 받느라 조금 걸립니다)"));
+  if (!live.length && !giftReading) box.append(el("div", { class: "empty" }, "기프티콘 스크린샷을 넣으면 상품명과 유효기간을 읽어 마감 순으로 모아 둡니다."));
+  if (used.length) {
+    const d = el("details", { class: "giftdone" }, el("summary", {}, "썼음 " + used.length), el("div", { class: "gifts" }, ...used.map(giftRow)));
+    d.open = giftDoneOpen;
+    d.addEventListener("toggle", () => { giftDoneOpen = d.open; });
+    box.append(d);
+  }
+  if (giftFocus) {
+    const ta = box.querySelector('[data-gid="' + giftFocus + '"]');
+    giftFocus = null;
+    if (ta) ta.focus();
+  }
+}
+function showTab(t) {
+  tab = t;
+  store.set("tab", t);
+  for (const b of $("tabs").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.tab === t));
+  $("board").hidden = t !== "todo";
+  $("giftBoard").hidden = t !== "gift";
+}
+$("tabs").addEventListener("click", (e) => { const b = e.target.closest("button[data-tab]"); if (b) showTab(b.dataset.tab); });
+
 /* ---------- 로그인 ---------- */
 function signOutLocal() {
   for (const k of [TOKEN_KEY, USER_KEY, CACHE_KEY, PENDING_KEY]) localStorage.removeItem(k);
 }
 async function startBoard(token) {
   $("login").hidden = true;
-  $("board").hidden = false;
+  $("tabs").hidden = false;
+  showTab(tab);
   $("logoutBtn").hidden = false;
   db = makeDb(token, () => { signOutLocal(); location.reload(); });
   col = db.collection("tasks");
@@ -1125,6 +1315,11 @@ async function startBoard(token) {
     tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     render();
   });
+  gcol = db.collection("gifts");
+  gcol.onSnapshot((snap) => {
+    gifts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderGifts();
+  });
   // 캐시로 먼저 그려 두었으니, 처음 여는 경우에만 "불러오는 중"을 띄운다
   if (!localStorage.getItem(CACHE_KEY)) setStatus("불러오는 중…");
   try { await db.sync(); setStatus(""); }
@@ -1135,6 +1330,8 @@ async function startBoard(token) {
 }
 function showLogin() {
   $("board").hidden = true;
+  $("giftBoard").hidden = true;
+  $("tabs").hidden = true;
   $("logoutBtn").hidden = true;
   $("login").hidden = false;
 }
