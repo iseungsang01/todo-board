@@ -22,7 +22,9 @@
 ## 기프티콘 탭
 
 - 맨 위 **기프티콘** 탭에서 "스크린샷으로 추가"로 기프티콘 캡처를 (여러 장도) 넣으면 상품명·교환처·유효기간을 읽어 마감 순으로 늘어놓는다. 7일 안에 끝나는 것은 탭 옆에 빨간 숫자로 뜬다.
-- 글자 읽기는 브라우저 안에서 [tesseract.js](https://github.com/naptha/tesseract.js) OCR(한국어+영어)로 한다. 사진은 서버로 가지 않고, 목록 옆에 보일 작은 미리보기만 저장된다. 처음 한 번은 글자 모델(약 7MB)을 받느라 조금 걸린다.
+- 글자 읽기는 브라우저 안에서 [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) 모바일 모델을 [onnxruntime-web](https://onnxruntime.ai/)으로 돌려 한다. 사진은 서버로 가지 않고, 목록 옆에 보일 작은 미리보기만 저장된다. 처음 한 번은 모델(약 16MB)을 받느라 조금 걸린다.
+  - `models/det.onnx`: 글자 상자 찾기 PP-OCRv3 mobile det, `models/rec-ko.onnx` + `dict-ko.txt`: 한국어 읽기 PP-OCRv5 mobile rec. ONNX 변환본은 Hugging Face `monkt/paddleocr-onnx`에서 받았다 (Apache-2.0).
+  - 읽은 줄에서 "까지·유효기간" 줄의 날짜(범위면 끝 날짜)를 유효기간으로, 그 바로 위에 붙은 줄을 상품명으로, 앞의 `[스타벅스]` 머리말을 교환처로 고른다. 카카오 선물하기·CJ 기프트카드 캡처 7장에서 날짜 7/7, 상품명 6/7 (1장은 글자 하나 틀림).
 - 읽은 값이 틀리면 그 자리에서 고친다. 날짜는 D-day 단추를 눌러 바꾼다. 다 쓴 것은 "썼음"으로 아래에 접어 둔다.
 - 데이터는 할 일과 같은 `todo_board_docs`의 `gifts` 묶음.
 

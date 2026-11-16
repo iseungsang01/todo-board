@@ -1145,61 +1145,160 @@ let day = ymd(new Date());
 setInterval(() => { const d = ymd(new Date()); if (d !== day) { day = d; render(); } }, 60000);
 
 /* ---------- 기프티콘 ----------
-   스크린샷을 넣으면 브라우저 안에서 OCR(tesseract.js, 한국어+영어)로 글자를 읽어 상품명·교환처·유효기간을 고른다.
+   스크린샷을 넣으면 브라우저 안에서 OCR(PaddleOCR 모델)로 글자를 읽어 상품명·교환처·유효기간을 고른다.
    사진은 서버로 보내지 않는다. 읽은 값은 틀릴 수 있어 바로 고칠 수 있게 보여 준다.
    "gifts" 묶음에 {name, brand, due, thumb(작은 JPEG), used, createdAt}로 저장한다. */
 const GIFT_SOON = 7;
-const TESS_URL = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
 let gifts = [], gcol = null;
 let giftReading = 0, giftFocus = null, giftDoneOpen = false;
 let tab = store.get("tab", "todo");
 
 const GIFT_DATE_KEY = /유효|기한|까지|만료|사용\s*기간|~/;
 const GIFT_SKIP = /유효|기한|까지|만료|교환처|사용처|주문|번호|선물|바코드|사용\s*기간|%|\d{1,2}:\d{2}/;
-// OCR 줄({text, conf, h, y})에서 유효기간(날짜 말이 붙은 줄 우선, 없으면 가장 늦은 날짜),
-// 상품명(글자가 가장 큰 줄), 교환처([GS25] 머리말 · "교환처" 줄 · 상품명 바로 윗줄)를 고른다.
+const GIFT_DATE_RE = /(20\d{2})[.\-\/년](\d{1,2})[.\-\/월](\d{1,2})/g;
+// OCR 줄({text, conf, h, y})에서 유효기간·상품명·교환처를 고른다.
+// - 유효기간: "까지·유효기간·~"가 붙은 줄의 날짜 중 가장 늦은 것(2026/07/21 ~ 2026/09/19 → 끝 날짜), 없으면 아무 날짜 중 가장 늦은 것
+// - 상품명: "상품명 :" 줄, 없으면 유효기간 줄 바로 위에 붙은 한두 줄(카카오 선물하기 꼴은 상품명이 날짜 위에서 글자 단위로 꺾인다)
+//   그래도 없으면 글자가 가장 큰 줄
+// - 교환처: 상품명 앞 [스타벅스] 같은 머리말, 없으면 "교환처·사용처" 줄
 function parseGift(lines) {
   const dates = [];
+  let dateLine = null;
   for (const l of lines) {
-    const re = /(20\d{2})[.\-\/년](\d{1,2})[.\-\/월](\d{1,2})/g;
     const s = l.text.replace(/[\s_]+/g, "");
-    let m;
-    while ((m = re.exec(s))) {
+    for (const m of s.matchAll(GIFT_DATE_RE)) {
       const mo = +m[2], da = +m[3];
-      if (mo >= 1 && mo <= 12 && da >= 1 && da <= 31) dates.push({ v: m[1] + "-" + pad(mo) + "-" + pad(da), key: GIFT_DATE_KEY.test(l.text) });
+      if (mo < 1 || mo > 12 || da < 1 || da > 31) continue;
+      const d = { v: m[1] + "-" + pad(mo) + "-" + pad(da), key: GIFT_DATE_KEY.test(l.text), l };
+      dates.push(d);
     }
   }
   dates.sort((a, b) => (b.key - a.key) || (a.v < b.v ? 1 : -1));
+  if (dates[0]) dateLine = dates[0].l;
   const isName = (t) => (t.match(/[가-힣A-Za-z]/g) || []).length >= 2 && !GIFT_SKIP.test(t) && (t.match(/\d/g) || []).length < t.length / 2;
-  const cand = lines.filter(l => l.conf >= 50 && isName(l.text)).sort((a, b) => b.h - a.h);
-  const top = cand[0];
-  let name = top ? top.text : "", brand = "";
-  const bracket = name.match(/^\[([^\]]+)\]\s*/);
-  if (bracket) { brand = bracket[1]; name = name.slice(bracket[0].length); }
+  let name = "";
+  const label = lines.find(l => /상품명/.test(l.text));
+  if (label) name = label.text.replace(/.*상품명\s*[:：]?\s*/, "");
+  else if (dateLine) {
+    // 날짜 줄 위로 맞붙은 줄을 아래에서부터 모은다 (줄 사이가 날짜 글자 높이만큼보다 벌어지면 멈춘다)
+    const parts = [];
+    let edge = dateLine.y;
+    const above = lines.filter(l => l !== dateLine && l.y < dateLine.y && l.conf >= 50).sort((a, b) => (b.y + b.h) - (a.y + a.h));
+    for (const l of above) {
+      if (edge - (l.y + l.h) > dateLine.h * 1.2 || l.h > dateLine.h * 1.8 || parts.length >= 3 || !isName(l.text)) break; // 벌어졌거나 로고처럼 큰 글자면 멈춤
+      parts.unshift(l.text);
+      edge = Math.min(edge, l.y);
+    }
+    // 글자 단위로 꺾인 줄은 띄지 않고 잇는다. 다만 ] 로 끝난 줄 뒤는 띄운다.
+    name = parts.reduce((s, p) => !s ? p : s + (/[\]\s]$/.test(s) ? " " : "") + p, "");
+  }
+  let top = null;
+  if (!name) { // 크고 긴 줄 (짧은 상표 로고보다 상품명이 길다)
+    const score = (l) => l.h * Math.sqrt(l.text.replace(/\s/g, "").length);
+    top = lines.filter(l => l.conf >= 50 && isName(l.text)).sort((a, b) => score(b) - score(a))[0];
+    if (top) name = top.text;
+  }
+  // 앞의 [교환처] [교환처] 머리말을 떼어 교환처로 쓴다 (OCR이 [ 나 ] 를 빠뜨려도)
+  let brand = "";
+  for (let m; (m = name.match(/^\s*\[?([^\[\]]{1,15})\]\s*/)) && (name.startsWith("[") || m[0].includes("]")); ) {
+    brand = brand || m[1].trim();
+    name = name.slice(m[0].length);
+  }
   const where = lines.find(l => /교환처|사용처/.test(l.text));
   if (!brand && where) brand = where.text.replace(/.*(교환처|사용처)\s*[:：]?\s*/, "").replace(/\s*전국.*$/, "");
-  if (!brand && top) {
-    const above = lines.filter(l => l.y < top.y && isName(l.text) && l.text.length <= 15).sort((a, b) => b.y - a.y)[0];
-    if (above && top.y - above.y < top.h * 3) brand = above.text;
+  if (!brand && top) { // 상품명 바로 윗줄의 짧은 글은 상표
+    const up = lines.filter(l => l.y < top.y && isName(l.text) && l.text.length <= 15).sort((a, b) => b.y - a.y)[0];
+    if (up && top.y - up.y < top.h * 3) brand = up.text;
   }
   return { name: name.trim(), brand: brand.trim(), due: dates[0] ? dates[0].v : "" };
 }
-let ocrWorker = null;
+/* OCR: PaddleOCR 모바일 모델(글자 상자 찾기 PP-OCRv3 det 2.4MB + 한국어 읽기 PP-OCRv5 rec 13MB)을
+   onnxruntime-web으로 브라우저에서 돌린다. 모델은 models/ 에 두고 처음 쓸 때 받는다. */
+const ORT_URL = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+let ocrModels = null;
 function ocrReady() {
-  if (!ocrWorker) ocrWorker = (async () => {
-    if (!window.Tesseract) await new Promise((ok, no) => document.head.append(el("script", { src: TESS_URL, onload: ok, onerror: no })));
-    return Tesseract.createWorker(["kor", "eng"]);
-  })().catch((e) => { ocrWorker = null; throw e; });
-  return ocrWorker;
+  if (!ocrModels) ocrModels = (async () => {
+    if (!window.ort) await new Promise((ok, no) => document.head.append(el("script", { src: ORT_URL + "ort.wasm.min.js", onload: ok, onerror: no })));
+    ort.env.wasm.wasmPaths = ORT_URL;
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.proxy = true; // 모델 계산은 웹 워커에서 — 읽는 동안 화면이 멈추지 않게
+    const [det, rec, dict] = await Promise.all([
+      ort.InferenceSession.create("models/det.onnx"),
+      ort.InferenceSession.create("models/rec-ko.onnx"),
+      fetch("models/dict-ko.txt").then(r => { if (!r.ok) throw new Error("dict"); return r.text(); }),
+    ]);
+    return { det, rec, chars: ["", ...dict.split(/\r?\n/).filter((c, i, a) => c || i < a.length - 1), " "] };
+  })().catch((e) => { ocrModels = null; throw e; });
+  return ocrModels;
 }
-async function readGift(file) {
-  const w = await ocrReady();
-  const { data } = await w.recognize(file, {}, { blocks: true });
-  const lines = (data.blocks || []).flatMap(b => b.paragraphs.flatMap(p => p.lines))
-    .map(l => ({ text: l.text.normalize("NFKC").trim(), conf: l.confidence, h: l.bbox.y1 - l.bbox.y0, y: l.bbox.y0 }))
-    .filter(l => l.text);
-  return parseGift(lines);
+// 캔버스의 한 부분을 w×h로 줄이거나 늘려 [1,3,h,w] BGR 텐서로 만든다 (Paddle은 BGR로 학습)
+function tensorOf(src, sx, sy, sw, sh, w, h, mean, std) {
+  const c = el("canvas", { width: w, height: h });
+  const g = c.getContext("2d", { willReadFrequently: true });
+  g.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+  const px = g.getImageData(0, 0, w, h).data, n = w * h, out = new Float32Array(3 * n);
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) out[k * n + i] = (px[i * 4 + 2 - k] / 255 - mean[k]) / std[k];
+  return new ort.Tensor("float32", out, [1, 3, h, w]);
 }
+// 글자 확률 지도에서 0.3 넘는 칸을 이어 붙인 덩어리마다 상자 하나 (평균 확률 0.6 미만은 버림)
+function boxesOf(prob, W, H) {
+  const seen = new Uint8Array(W * H), stack = new Int32Array(W * H), boxes = [];
+  for (let s = 0; s < W * H; s++) {
+    if (seen[s] || prob[s] <= 0.3) continue;
+    let top = 0, x0 = W, y0 = H, x1 = 0, y1 = 0, sum = 0, cnt = 0;
+    stack[top++] = s; seen[s] = 1;
+    while (top) {
+      const p = stack[--top], x = p % W, y = (p - x) / W;
+      sum += prob[p]; cnt++;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (const q of [p - 1, p + 1, p - W, p + W]) {
+        if (q < 0 || q >= W * H || seen[q] || prob[q] <= 0.3 || (q === p - 1 && x === 0) || (q === p + 1 && x === W - 1)) continue;
+        seen[q] = 1; stack[top++] = q;
+      }
+    }
+    if (x1 - x0 >= 3 && y1 - y0 >= 3 && sum / cnt >= 0.6) boxes.push({ x0, y0, x1: x1 + 1, y1: y1 + 1 });
+  }
+  return boxes;
+}
+async function ocrLines(file) {
+  const { det, rec, chars } = await ocrReady();
+  const img = await createImageBitmap(file);
+  const W0 = img.width, H0 = img.height;
+  // 작은 글자가 두 줄로 붙어 잡히지 않게 긴 변을 1600쯤으로 키워(최대 3배) 상자를 찾는다
+  const s = Math.min(3, 1600 / Math.max(W0, H0));
+  const dw = Math.max(32, Math.round(W0 * s / 32) * 32), dh = Math.max(32, Math.round(H0 * s / 32) * 32);
+  const dout = (await det.run({ [det.inputNames[0]]: tensorOf(img, 0, 0, W0, H0, dw, dh, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]) }))[det.outputNames[0]];
+  const fx = W0 / dw, fy = H0 / dh, lines = [];
+  for (const b of boxesOf(dout.data, dw, dh)) {
+    const d = b.y1 - b.y0; // 상자가 글자에 바짝 붙어 나오므로 글자 높이만큼 넓혀 읽는다
+    const cx0 = Math.max(0, (b.x0 - d) * fx), cy0 = Math.max(0, (b.y0 - d) * fy);
+    const cw = Math.min(W0, (b.x1 + d) * fx) - cx0, ch = Math.min(H0, (b.y1 + d) * fy) - cy0;
+    const rw = Math.max(8, Math.round(cw * 48 / ch));
+    const out = (await rec.run({ [rec.inputNames[0]]: tensorOf(img, cx0, cy0, cw, ch, rw, 48, [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]) }))[rec.outputNames[0]];
+    const [, T, C] = out.dims;
+    let text = "", last = 0, ps = 0, np = 0;
+    for (let t = 0; t < T; t++) { // CTC: 칸마다 가장 높은 글자, 같은 글자 반복·빈칸(0)은 뺀다
+      let bi = 0, bv = -Infinity;
+      for (let c = 0; c < C; c++) { const v = out.data[t * C + c]; if (v > bv) { bv = v; bi = c; } }
+      if (bi !== last && bi !== 0) { text += chars[bi] || ""; ps += bv; np++; }
+      last = bi;
+    }
+    text = text.normalize("NFKC").trim();
+    // 찾은 상자는 글자 가운데 심만 잡으므로 줄 자리·높이는 실제 글자 크기쯤(위아래로 0.7배씩)으로 넓혀 둔다
+    if (text) lines.push({ text, conf: np ? ps / np * 100 : 0, x: b.x0 * fx, y: (b.y0 - 0.7 * d) * fy, h: 2.4 * d * fy });
+  }
+  img.close();
+  // 같은 줄에 따로 잡힌 상자는 왼쪽부터 이어 한 줄로
+  const rows = [];
+  for (const l of lines.sort((a, b) => a.x - b.x)) {
+    const r = rows.find(r => Math.min(r.y + r.h, l.y + l.h) - Math.max(r.y, l.y) > 0.6 * Math.min(r.h, l.h));
+    if (!r) { rows.push({ ...l }); continue; }
+    const y1 = Math.max(r.y + r.h, l.y + l.h);
+    r.text += " " + l.text; r.conf = Math.min(r.conf, l.conf); r.y = Math.min(r.y, l.y); r.h = y1 - r.y;
+  }
+  return rows.sort((a, b) => a.y - b.y);
+}
+async function readGift(file) { return parseGift(await ocrLines(file)); }
 async function thumbOf(file) {
   const bmp = await createImageBitmap(file);
   const W = 120, H = Math.round(bmp.height * W / bmp.width);
