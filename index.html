@@ -139,7 +139,7 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus
 .gift.late { border-color: var(--late); }
 .gift.used { opacity: .55; }
 .gift.used .text { text-decoration: line-through; }
-.gift .thumb { width: 44px; height: 60px; object-fit: cover; object-position: top; border-radius: 6px; background: var(--bg); }
+.gift .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; background: var(--bg); }
 .gift .noimg { display: grid; place-items: center; font-size: 20px; }
 .gift .gmain { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .gift .gbrand { font: inherit; font-size: 12.5px; color: var(--muted); background: transparent; border: 0; padding: 0 4px; outline: none; }
@@ -1147,7 +1147,8 @@ setInterval(() => { const d = ymd(new Date()); if (d !== day) { day = d; render(
 /* ---------- 기프티콘 ----------
    스크린샷을 넣으면 브라우저 안에서 OCR(PaddleOCR 모델)로 글자를 읽어 상품명·교환처·유효기간을 고른다.
    사진은 서버로 보내지 않는다. 읽은 값은 틀릴 수 있어 바로 고칠 수 있게 보여 준다.
-   "gifts" 묶음에 {name, brand, due, thumb(작은 JPEG), used, createdAt}로 저장한다. */
+   "gifts" 묶음에 {name, brand, due, photo, used, createdAt}를 저장한다. photo는 바코드가 나오기 전 윗부분만 잘라 줄인 사진이다
+   (상품명·유효기간 줄이나 바코드 번호 줄보다 위, 그리고 많아야 위쪽 절반). 글자를 못 읽어 자를 자리를 모르면 사진은 남기지 않는다. */
 const GIFT_SOON = 7;
 let gifts = [], gcol = null;
 let giftReading = 0, giftFocus = null, giftDoneOpen = false;
@@ -1296,16 +1297,35 @@ async function ocrLines(file) {
     const y1 = Math.max(r.y + r.h, l.y + l.h);
     r.text += " " + l.text; r.conf = Math.min(r.conf, l.conf); r.y = Math.min(r.y, l.y); r.h = y1 - r.y;
   }
-  return rows.sort((a, b) => a.y - b.y);
+  return { lines: rows.sort((a, b) => a.y - b.y), width: W0, height: H0 };
 }
-async function readGift(file) { return parseGift(await ocrLines(file)); }
-async function thumbOf(file) {
+// 바코드보다 위에서 자를 높이. 상품명·날짜·안내 글은 바코드 위에 있고, 바코드 번호 줄 위에는 막대가 있으므로 그만큼 더 올린다.
+function photoCut(lines, H) {
+  let cut = H * 0.5;
+  const date = lines.find(l => /20\d{2}[.\-\/년]\d{1,2}[.\-\/월]\d{1,2}/.test(l.text.replace(/\s+/g, "")));
+  for (const l of lines) {
+    const digits = (l.text.match(/\d/g) || []).length;
+    if (l === date || /상품명|유효|기한|까지|교환처|사용처/.test(l.text)) cut = Math.min(cut, l.y);
+    if (digits >= 8 && l !== date) cut = Math.min(cut, l.y - l.h * 8); // 바코드 번호 → 막대 높이만큼 위
+    if (date && l.y < date.y && date.y - l.y < date.h * 5) cut = Math.min(cut, l.y); // 날짜 바로 위 상품명 줄
+  }
+  return cut - 4 < H * 0.1 ? 0 : Math.round(cut - 4);
+}
+async function photoOf(file, cut) {
   const bmp = await createImageBitmap(file);
-  const W = 120, H = Math.round(bmp.height * W / bmp.width);
+  const W = 160, H = Math.round(cut * W / bmp.width);
   const c = el("canvas", { width: W, height: H });
-  c.getContext("2d").drawImage(bmp, 0, 0, W, H);
+  c.getContext("2d").drawImage(bmp, 0, 0, bmp.width, cut, 0, 0, W, H);
   bmp.close();
   return c.toDataURL("image/jpeg", 0.7);
+}
+async function readGift(file) {
+  const { lines, height } = await ocrLines(file);
+  const info = parseGift(lines);
+  const cut = photoCut(lines, height);
+  let photo = "";
+  try { if (cut) photo = await photoOf(file, cut); } catch {} // 사진만 실패해도 읽은 글은 살린다
+  return { ...info, photo };
 }
 function setGiftStatus(msg, err) {
   const s = $("giftStatus");
@@ -1317,11 +1337,10 @@ async function addGiftFiles(files) {
   renderGifts();
   let failed = 0;
   for (const f of files) {
-    let info = { name: "", brand: "", due: "" }, thumb = "";
-    try { thumb = await thumbOf(f); } catch {}
+    let info = { name: "", brand: "", due: "", photo: "" };
     try { info = await readGift(f); } catch { failed++; }
     giftReading--;
-    await write(() => gcol.add({ ...info, thumb, used: false, createdAt: Date.now() }));
+    await write(() => gcol.add({ ...info, used: false, createdAt: Date.now() }));
   }
   renderGifts();
   if (failed) setGiftStatus("글자를 읽지 못한 사진이 " + failed + "장 있습니다. 상품명·날짜를 직접 적어 주세요.", true);
@@ -1329,7 +1348,7 @@ async function addGiftFiles(files) {
 $("giftAddBtn").addEventListener("click", () => $("giftFile").click());
 $("giftFile").addEventListener("change", (e) => { const fs = [...e.target.files]; e.target.value = ""; if (fs.length) addGiftFiles(fs); });
 $("giftManualBtn").addEventListener("click", async () => {
-  const { id } = await gcol.add({ name: "", brand: "", due: "", thumb: "", used: false, createdAt: Date.now() });
+  const { id } = await gcol.add({ name: "", brand: "", due: "", used: false, createdAt: Date.now() });
   giftFocus = id;
   renderGifts();
 });
@@ -1353,7 +1372,7 @@ function giftRow(g) {
   brand.addEventListener("change", () => patchGift(g, { brand: brand.value.trim() }));
   brand.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) brand.blur(); });
   return el("div", { class: "gift" + (g.used ? " used" : n !== null && n < 0 ? " late" : "") },
-    g.thumb ? el("img", { class: "thumb", src: g.thumb, alt: "" }) : el("div", { class: "thumb noimg" }, "🎁"),
+    g.photo ? el("img", { class: "thumb", src: g.photo, alt: "" }) : el("div", { class: "thumb noimg" }, "🎁"),
     el("div", { class: "gmain" }, name, brand),
     el("div", { class: "gside" }, date,
       el("button", { type: "button", class: "use", onclick: () => { patchGift(g, { used: !g.used }); renderGifts(); } }, g.used ? "되살리기" : "썼음"),
@@ -1417,6 +1436,7 @@ async function startBoard(token) {
   gcol = db.collection("gifts");
   gcol.onSnapshot((snap) => {
     gifts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    for (const g of gifts) if ("thumb" in g) { const { id, thumb, ...data } = g; delete g.thumb; gcol.doc(id).set(data); } // 예전 판이 올린 통사진(바코드가 보임) 지우기
     renderGifts();
   });
   // 캐시로 먼저 그려 두었으니, 처음 여는 경우에만 "불러오는 중"을 띄운다
