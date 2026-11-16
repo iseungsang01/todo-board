@@ -1,7 +1,7 @@
 // 앱 화면(이 폴더 파일 + CDN 스크립트·글꼴)을 캐시해 인터넷 없이도 열리게 한다.
 // 이 폴더 파일은 네트워크 먼저(새 판이 바로 보이게), CDN은 주소에 버전이 박혀 있어 캐시 먼저.
 // Supabase 호출은 건드리지 않는다 — 목록 데이터는 index.html이 localStorage에 따로 캐시한다.
-const CACHE = "todo-board-v2";
+const CACHE = "todo-board-v3";
 const SHELL = [
   "./", "index.html", "manifest.webmanifest", "icon.svg",
   "https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js",
@@ -29,7 +29,10 @@ self.addEventListener("fetch", (e) => {
       .then((res) => { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); return res; })
       .catch(async () => (await caches.match(req, { ignoreSearch: true })) || caches.match("./")));
   } else if (CDN_HOSTS.includes(url.hostname)) {
-    e.respondWith(caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+    // <script>로 받은 것은 불투명(opaque) 응답으로 캐시되는데, 같은 주소를 fetch()(CORS)로 다시 부르면
+    // 그 불투명 응답은 쓸 수 없어 실패한다 (onnxruntime-web이 웹 워커를 띄울 때 자기 스크립트를 이렇게 다시 받는다).
+    // 그럴 때는 네트워크에서 CORS로 받아 캐시를 바꿔 둔다 — CORS 응답은 <script>에도 그대로 쓸 수 있다.
+    e.respondWith(caches.match(req).then((hit) => (hit && !(hit.type === "opaque" && req.mode === "cors")) ? hit : fetch(req).then((res) => {
       const copy = res.clone();
       caches.open(CACHE).then((c) => c.put(req, copy));
       return res;
