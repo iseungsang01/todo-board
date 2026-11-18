@@ -957,21 +957,34 @@ function dateControl(key, due, done, onSave, cls) {
       value: due ? (+due.slice(5, 7)) + "/" + (+due.slice(8, 10)) : "" });
     const cal = el("input", { type: "date", class: "datecal", tabindex: "-1", "aria-hidden": "true", value: due || "" });
     cal.addEventListener("change", () => { if (cal.value) save(cal.value); });
+    // 적은 값을 날짜로 읽는다 — 비우면 "", 못 읽으면 null
+    const parsed = () => {
+      const v = txt.value.trim();
+      if (!v) return "";
+      const p = parseLine(/^\d{3,4}$/.test(v) ? v.slice(0, -2) + "/" + v.slice(-2) : v); // 1130 → 11/30
+      return p.due && !p.text ? p.due : null;
+    };
     txt.addEventListener("keydown", (e) => {
       if (e.key === "Escape") { e.preventDefault(); close(); return; }
       if (e.key !== "Enter" || e.isComposing) return;
       e.preventDefault();
-      const v = txt.value.trim();
-      if (!v) { save(""); return; }
-      const p = parseLine(/^\d{3,4}$/.test(v) ? v.slice(0, -2) + "/" + v.slice(-2) : v); // 1130 → 11/30
-      if (p.due && !p.text) save(p.due);
+      const v = parsed();
+      if (v !== null) save(v);
       else { txt.classList.add("bad"); txt.select(); }
     });
     txt.addEventListener("input", () => txt.classList.remove("bad"));
     const box = el("span", { class: "dateedit" + (cls ? " " + cls : "") }, txt,
       el("button", { type: "button", class: "ic small", title: "달력에서 고르기", "aria-label": "달력에서 고르기",
         onclick: () => { try { cal.showPicker(); } catch { cal.focus(); } } }, "📅"), cal);
-    box.addEventListener("focusout", (e) => { if (!box.contains(e.relatedTarget)) setTimeout(() => { if (!box.contains(document.activeElement)) close(); }, 0); });
+    // 다른 데를 누르면 적어 둔 날짜를 저장하고 닫는다(못 읽는 글이면 그냥 닫는다)
+    box.addEventListener("focusout", (e) => {
+      if (box.contains(e.relatedTarget)) return;
+      setTimeout(() => {
+        if (dateOpen !== key || box.contains(document.activeElement)) return;
+        const v = parsed();
+        if (v !== null && v !== (due || "")) save(v); else close();
+      }, 0);
+    });
     requestAnimationFrame(() => { txt.focus(); txt.select(); });
     return box;
   }
@@ -1152,7 +1165,7 @@ setInterval(() => { const d = ymd(new Date()); if (d !== day) { day = d; render(
 const GIFT_SOON = 7;
 let gifts = [], gcol = null;
 let giftReading = 0, giftFocus = null, giftDoneOpen = false;
-let tab = store.get("tab", "todo");
+let tab = "todo"; // 열 때는 늘 할 일 화면부터
 
 const GIFT_DATE_KEY = /유효|기한|까지|만료|사용\s*기간|~/;
 const GIFT_SKIP = /유효|기한|까지|만료|교환처|사용처|주문|번호|선물|바코드|사용\s*기간|%|\d{1,2}:\d{2}/;
@@ -1405,7 +1418,6 @@ function renderGifts() {
 }
 function showTab(t) {
   tab = t;
-  store.set("tab", t);
   for (const b of $("tabs").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.tab === t));
   $("board").hidden = t !== "todo";
   $("giftBoard").hidden = t !== "gift";
