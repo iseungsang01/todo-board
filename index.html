@@ -231,9 +231,7 @@ textarea.text, .text.view {
 }
 textarea.text:focus { outline: none; background: var(--bg); }
 .row.done .text { color: var(--muted); text-decoration: line-through; }
-.meta { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); padding: 0 4px; }
-.meta a { color: var(--accent); }
-.meta .cat { background: var(--cs, var(--bg)); color: var(--ct, var(--muted)); border-radius: 5px; padding: 0 7px; }
+.title .cat { flex: none; align-self: center; margin-left: 4px; font-size: 12px; white-space: nowrap; background: var(--cs, var(--bg)); color: var(--ct, var(--muted)); border-radius: 5px; padding: 0 7px; }
 .subs { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 0 4px; }
 .sub { display: flex; gap: 4px; align-items: flex-start; }
 .sub textarea.text { flex: 1; min-width: 0; }
@@ -1000,14 +998,14 @@ function rowView(t, showCat) {
   // 같은 할 일이 "급한 일"과 제 분류에 두 번 그려지므로, 누른 그 줄에서만 날짜 칸을 연다
   const inst = showCat ? ":urgent" : "";
   const dateCtl = dateControl(t.id + inst, t.due, t.done, (due) => patch(t, { due }));
-  const meta = showCat ? el("div", { class: "meta" },
-    el("span", { class: "cat", style: cstyle(catOf(t)) }, catOf(t))) : null;
+  // 급한 일 목록에선 분류 태그를 제목 줄 끝에 붙인다
+  const catTag = showCat ? el("span", { class: "cat", style: cstyle(catOf(t)) }, catOf(t)) : null;
 
   const row = el("div", { class: "row" + (t.done ? " done" : "") + (late ? " late" : "") },
     el("span", { class: "lead" },
       el("span", { class: "grip" + (!t.done && !showCat ? "" : " off"), title: "끌어서 순서·분류 바꾸기", "aria-hidden": "true" }, "⠿"),
       el("button", { class: "check", type: "button", "aria-label": t.done ? "완료 취소" : "완료", onclick: () => toggle(t) })),
-    el("div", { class: "body" }, el("div", { class: "title" }, textBox(t.text, (v, final) => saveText(t, v, final)), subAddBtn(t)), meta, subsView(t, t.sub, 1, inst)),
+    el("div", { class: "body" }, el("div", { class: "title" }, textBox(t.text, (v, final) => saveText(t, v, final)), subAddBtn(t), catTag), subsView(t, t.sub, 1, inst)),
     el("div", { class: "side" }, dateCtl,
       el("div", { class: "acts" },
         el("button", { class: "ic star" + (t.star ? " on" : ""), type: "button", "aria-label": t.star ? "중요 해제" : "중요 표시", "aria-pressed": String(!!t.star),
