@@ -1166,12 +1166,16 @@ let giftReading = 0, giftFocus = null, giftDoneOpen = false;
 let tab = "todo"; // 열 때는 늘 할 일 화면부터
 
 const GIFT_DATE_KEY = /유효|기한|까지|만료|사용\s*기간|~/;
-const GIFT_SKIP = /유효|기한|까지|만료|교환처|사용처|주문|번호|선물|바코드|사용\s*기간|%|\d{1,2}:\d{2}/;
+const GIFT_SKIP = /유효|기한|까지|만료|교환처|사용처|주문|번호|선물|바코드|사용\s*기간|잔액|%|\d{1,2}:\d{2}/;
+// 선물 메시지 카드 글("고맙습니다·생일 축하해·잘 먹어요") — 상품명이 아니다
+const GIFT_MSG = /고마|감사|축하|사랑|생일|힘내|화이팅|파이팅|수고|응원|보낸|thank|(니다|해요|세요|어요|아요|에요|예요)[!~.♡♥:)]*$/i;
+// 금액: 10,000원 · 5000원 · 3만원 · 5천원권 · 1만 5천원
+const GIFT_AMOUNT = /\d[\d,]*\s*(만\s*(\d\s*천\s*)?|천\s*)?원권?/;
 const GIFT_DATE_RE = /(20\d{2})[.\-\/년](\d{1,2})[.\-\/월](\d{1,2})/g;
 // OCR 줄({text, conf, h, y})에서 유효기간·상품명·교환처를 고른다.
 // - 유효기간: "까지·유효기간·~"가 붙은 줄의 날짜 중 가장 늦은 것(2026/07/21 ~ 2026/09/19 → 끝 날짜), 없으면 아무 날짜 중 가장 늦은 것
 // - 상품명: "상품명 :" 줄, 없으면 유효기간 줄 바로 위에 붙은 한두 줄(카카오 선물하기 꼴은 상품명이 날짜 위에서 글자 단위로 꺾인다)
-//   그래도 없으면 글자가 가장 큰 줄
+//   그래도 없으면 글자가 가장 큰 줄 (메시지 카드의 "고맙습니다" 같은 글은 빼고). 금액권은 "10,000원" 같은 금액을 뒤에 붙인다
 // - 교환처: 상품명 앞 [스타벅스] 같은 머리말, 없으면 "교환처·사용처" 줄
 function parseGift(lines) {
   const dates = [];
@@ -1187,28 +1191,42 @@ function parseGift(lines) {
   }
   dates.sort((a, b) => (b.key - a.key) || (a.v < b.v ? 1 : -1));
   if (dates[0]) dateLine = dates[0].l;
-  const isName = (t) => (t.match(/[가-힣A-Za-z]/g) || []).length >= 2 && !GIFT_SKIP.test(t) && (t.match(/\d/g) || []).length < t.length / 2;
+  const isMsg = (t) => GIFT_MSG.test(t.replace(/\s+/g, ""));
+  const isAmount = (t) => GIFT_AMOUNT.test(t) && !GIFT_SKIP.test(t);
+  const isName = (t) => (t.match(/[가-힣A-Za-z]/g) || []).length >= 2 && !GIFT_SKIP.test(t) && !isMsg(t) && (t.match(/\d/g) || []).length < t.length / 2;
+  const where = lines.find(l => /교환처|사용처/.test(l.text));
+  const whereName = where ? where.text.replace(/.*(교환처|사용처)\s*[:：]?\s*/, "").replace(/\s*전국.*$/, "").trim() : "";
+  const sameBrand = (t) => !!whereName && t.replace(/\s/g, "") === whereName.replace(/\s/g, "");
   let name = "";
   const label = lines.find(l => /상품명/.test(l.text));
   if (label) name = label.text.replace(/.*상품명\s*[:：]?\s*/, "");
   else if (dateLine) {
-    // 날짜 줄 위로 맞붙은 줄을 아래에서부터 모은다 (줄 사이가 날짜 글자 높이만큼보다 벌어지면 멈춘다)
+    // 날짜 줄 위로 맞붙은 줄을 아래에서부터 모은다 (줄 사이가 날짜 글자 높이만큼보다 벌어지면 멈춘다).
+    // "교환처·잔액" 같은 안내 줄은 건너뛰고, "10,000원" 같은 금액 줄은 상품명에 붙인다.
     const parts = [];
-    let edge = dateLine.y;
+    let edge = dateLine.y, skipped = 0;
     const above = lines.filter(l => l !== dateLine && l.y < dateLine.y && l.conf >= 50).sort((a, b) => (b.y + b.h) - (a.y + a.h));
     for (const l of above) {
-      if (edge - (l.y + l.h) > dateLine.h * 1.2 || l.h > dateLine.h * 1.8 || parts.length >= 3 || !isName(l.text)) break; // 벌어졌거나 로고처럼 큰 글자면 멈춤
-      parts.unshift(l.text);
+      if (edge - (l.y + l.h) > dateLine.h * 1.2 || l.h > dateLine.h * 1.8 || parts.length >= 3) break; // 벌어졌거나 로고처럼 큰 글자면 멈춤
+      const amt = isAmount(l.text) && !isName(l.text);
+      if (!parts.length && !amt && GIFT_SKIP.test(l.text) && !isMsg(l.text) && ++skipped <= 2) { edge = Math.min(edge, l.y); continue; }
+      if (!amt && (!isName(l.text) || (parts.length && sameBrand(l.text)))) break; // 교환처와 같은 윗줄은 상표
+      parts.unshift({ t: l.text, amt });
       edge = Math.min(edge, l.y);
     }
-    // 글자 단위로 꺾인 줄은 띄지 않고 잇는다. 다만 ] 로 끝난 줄 뒤는 띄운다.
-    name = parts.reduce((s, p) => !s ? p : s + (/[\]\s]$/.test(s) ? " " : "") + p, "");
+    // 글자 단위로 꺾인 줄은 띄지 않고 잇는다. 다만 ] 로 끝난 줄 뒤와 금액 앞은 띄운다.
+    name = parts.reduce((s, p) => !s ? p.t : s + (/[\]\s]$/.test(s) || p.amt ? " " : "") + p.t, "");
   }
   let top = null;
-  if (!name) { // 크고 긴 줄 (짧은 상표 로고보다 상품명이 길다)
+  if (!name) { // 크고 긴 줄 (짧은 상표 로고보다 상품명이 길다). "고맙습니다" 같은 메시지 카드 글은 빼고 고른다.
     const score = (l) => l.h * Math.sqrt(l.text.replace(/\s/g, "").length);
     top = lines.filter(l => l.conf >= 50 && isName(l.text)).sort((a, b) => score(b) - score(a))[0];
     if (top) name = top.text;
+  }
+  // 금액권처럼 상품명에 값이 없으면 근처의 "10,000원·5천원권·잔액 30,000원" 줄에서 금액을 붙인다
+  if (name && !GIFT_AMOUNT.test(name)) {
+    const a = lines.find(l => isAmount(l.text) || (/잔액|금액/.test(l.text) && GIFT_AMOUNT.test(l.text) && !/결제|할인|주문/.test(l.text)));
+    if (a) name += " " + a.text.match(GIFT_AMOUNT)[0].replace(/\s+/g, "");
   }
   // 앞의 [교환처] [교환처] 머리말을 떼어 교환처로 쓴다 (OCR이 [ 나 ] 를 빠뜨려도)
   let brand = "";
@@ -1216,8 +1234,7 @@ function parseGift(lines) {
     brand = brand || m[1].trim();
     name = name.slice(m[0].length);
   }
-  const where = lines.find(l => /교환처|사용처/.test(l.text));
-  if (!brand && where) brand = where.text.replace(/.*(교환처|사용처)\s*[:：]?\s*/, "").replace(/\s*전국.*$/, "");
+  if (!brand) brand = whereName;
   if (!brand && top) { // 상품명 바로 윗줄의 짧은 글은 상표
     const up = lines.filter(l => l.y < top.y && isName(l.text) && l.text.length <= 15).sort((a, b) => b.y - a.y)[0];
     if (up && top.y - up.y < top.h * 3) brand = up.text;
